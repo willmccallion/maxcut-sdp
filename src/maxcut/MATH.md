@@ -55,7 +55,7 @@ large as the integer program's.
 Define the **Gram matrix** $X \in \mathbb{S}^n$ by $X_{ij} = \langle \mathbf{v}_i, \mathbf{v}_j \rangle$.
 The matrix $X$ has the following properties:
 
-1. $X \succeq 0$ (positive semidefinite) — because $X = V^\top V$ where row $i$ of $V$ is $\mathbf{v}_i$
+1. $X \succeq 0$ (positive semidefinite) — because $X = V^\top V$ where column $i$ of $V$ is $\mathbf{v}_i$
 2. $X_{ii} = \|\mathbf{v}_i\|^2 = 1$ for all $i$ (unit vector constraint)
 
 Conversely, any $X \succeq 0$ with $X_{ii} = 1$ can be factored as $X = V^\top V$ to recover
@@ -234,12 +234,11 @@ $$
 
 **Computing $\alpha_{\text{GW}}$:**
 
-$$
-\alpha_{\text{GW}} = f(\theta^{*}) = \frac{2}{\pi} \cdot \frac{\theta^{*}}{1 - \cos \theta^{*}} \approx \frac{2}{\pi} \cdot \frac{2.331122}{1 - (-0.7254)} \approx \frac{2}{\pi} \cdot \frac{2.331122}{1.7254}
-$$
+At $\theta^{*}$, since $\tan(\theta^{*}/2) = \theta^{*}$, we can compute
+$\cos \theta^{*} = (1 - \theta^{*2})/(1 + \theta^{*2}) \approx -0.6892$. Then:
 
 $$
-\alpha_{\text{GW}} \approx \frac{2}{\pi} \cdot 1.3510 \approx 0.87856\ldots
+\alpha_{\text{GW}} = f(\theta^{*}) = \frac{2}{\pi} \cdot \frac{\theta^{*}}{1 - \cos \theta^{*}} \approx \frac{2}{\pi} \cdot \frac{2.331122}{1.6892} \approx \frac{2}{\pi} \cdot 1.3800 \approx 0.87856\ldots
 $$
 
 ### Main Theorem
@@ -406,23 +405,11 @@ for each edge $(i, i+1 \mod 5)$.
 
 **SDP optimal value:**
 
-$$
-\text{SDP}_{\text{OPT}} = \frac{1}{4} \langle L, X^{*} \rangle = \frac{5}{4}(1 - \cos 144°) = \frac{5}{4}(1 + 0.8090) \approx \frac{5 \times 1.8090}{4} \approx 2.261 \times 2 = 4.523 / 2
-$$
-
-More precisely, with the objective $\frac{1}{2}\sum w_{ij}(1 - X_{ij})$:
+Using $\langle L, X \rangle = \sum_{(i,j) \in E} w_{ij}(X_{ii} + X_{jj} - 2X_{ij}) = 5(2 - 2\cos 144°)$:
 
 $$
-\text{SDP}_{\text{OPT}} = \frac{5}{2}(1 - \cos 144°) = \frac{5}{2} \times 1.8090 \approx 4.523
+\text{SDP}_{\text{OPT}} = \frac{1}{4} \langle L, X^{*} \rangle = \frac{5}{2}(1 - \cos 144°) = \frac{5}{2}(1 + 0.8090) \approx 4.523
 $$
-
-Wait — let's be careful with the factor. The Max-Cut objective is:
-
-$$
-\frac{1}{2}\sum_{(i,j) \in E} (1 - X_{ij}) = \frac{5}{2}(1 - \cos 144°) = \frac{5}{2}(1.8090) = 4.523
-$$
-
-So $\text{SDP}_{\text{OPT}} \approx 4.523$.
 
 ### GW Guarantee
 

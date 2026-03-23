@@ -2,3 +2,15 @@
 /scripts/graphs/
 /.venv/
 results/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml

@@ -189,7 +189,7 @@ $$
 and the right-hand side $h \in \mathbb{R}^m$ has entries:
 
 $$
-h_i = b_i - \langle A_i, X \rangle + \langle A_i, \mu S^{-1} - X + W R_d W \rangle
+h_i = b_i - \langle A_i, X \rangle - \langle A_i, \mu S^{-1} - X \rangle + \langle A_i, W R_d W \rangle
 $$
 
 The matrix $M$ is symmetric positive definite (since $W \succ 0$ and the constraint matrices
@@ -198,7 +198,7 @@ then forward/back substitution.
 
 Once $\Delta y$ is known:
 - $\Delta S = R_d - \sum_i \Delta y_i A_i$
-- $\Delta X = \mu S^{-1} - X + W \Delta S \, W$ (symmetrized)
+- $\Delta X = \mu S^{-1} - X - W \Delta S \, W$ (symmetrized)
 
 ### 3.5 Step Size Selection
 
