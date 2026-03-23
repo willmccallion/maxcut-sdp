@@ -1,0 +1,86 @@
+[package]
+name = "maxcut-sdp"
+version = "0.1.0"
+edition = "2024"
+description = "From-scratch SDP solver with Goemans-Williamson Max-Cut approximation."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/willmccallion/maxcut-sdp"
+readme = "README.md"
+categories = ["algorithms", "mathematics", "science"]
+keywords = ["maxcut", "sdp", "semidefinite-programming", "approximation-algorithm"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+rand = "0.9"
+rayon = "1"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "maxcut_bench"
+harness = false
+
+[profile.release]
+opt-level     = 3
+lto           = "fat"
+codegen-units = 1
+panic         = "abort"
+strip         = "symbols"
+incremental   = false
+
+[profile.perf]
+inherits      = "release"
+strip         = false
+debug         = true
+lto           = false
+codegen-units = 16
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unused_results = "deny"
+unsafe_code = "forbid"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+# Strong baseline
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+cargo = { level = "deny", priority = -1 }
+
+# Strictness on panics/WIP code
+unwrap_used = "deny"
+expect_used = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+# Style/naming allows: standard for mathematical code
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+similar_names = "allow"                # e.g. dx, dy, ds in Newton directions
+unreadable_literal = "allow"
+many_single_char_names = "allow"       # i, j, k, n, m are standard in linear algebra
+inline_always = "allow"
+
+# Cast allows: f64 arithmetic requires intentional precision/truncation tradeoffs
+cast_precision_loss = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+cast_lossless = "allow"
+bool_to_int_with_if = "allow"
+
+# Solver and linalg functions are necessarily large
+too_many_lines = "allow"
+
+[lints.rustdoc]
+all = "deny"
+missing_crate_level_docs = "deny"
+broken_intra_doc_links = "deny"
