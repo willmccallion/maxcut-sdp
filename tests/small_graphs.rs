@@ -3,9 +3,9 @@
 //! These tests verify both the exact brute-force solver and the GW approximation
 //! against hand-computed max-cut values.
 
-use gw_maxcut::graph::Graph;
-use gw_maxcut::maxcut::exact::exact_maxcut;
-use gw_maxcut::maxcut::{gw_maxcut, GwConfig};
+use maxcut_sdp::graph::Graph;
+use maxcut_sdp::maxcut::exact::exact_maxcut;
+use maxcut_sdp::maxcut::{gw_maxcut, GwConfig};
 
 /// Triangle (K_3) with unit weights: OPT = 2 (cut any single vertex off).
 #[test]

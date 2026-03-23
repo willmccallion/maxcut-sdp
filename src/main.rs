@@ -1,4 +1,4 @@
-//! CLI entry point for gw-maxcut.
+//! CLI entry point for maxcut-sdp.
 //!
 //! Parses a graph from an input file, runs the Goemans-Williamson algorithm,
 //! and reports the cut value, SDP bound, and approximation ratio.
@@ -7,12 +7,12 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use gw_maxcut::maxcut::exact::exact_maxcut;
-use gw_maxcut::maxcut::{GwBmConfig, GwConfig, gw_maxcut, gw_maxcut_bm};
-use gw_maxcut::parser::{parse_auto, parse_biqmac, parse_dimacs};
-use gw_maxcut::sdp::solver::SolverConfig;
-use gw_maxcut::sdp::solver_bm::BmSolverConfig;
-use gw_maxcut::GwError;
+use maxcut_sdp::maxcut::exact::exact_maxcut;
+use maxcut_sdp::maxcut::{GwBmConfig, GwConfig, gw_maxcut, gw_maxcut_bm};
+use maxcut_sdp::parser::{parse_auto, parse_biqmac, parse_dimacs};
+use maxcut_sdp::sdp::solver::SolverConfig;
+use maxcut_sdp::sdp::solver_bm::BmSolverConfig;
+use maxcut_sdp::GwError;
 
 /// Goemans-Williamson Max-Cut approximation via semidefinite programming.
 #[derive(Parser, Debug)]

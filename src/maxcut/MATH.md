@@ -14,7 +14,7 @@ Given an undirected graph $G = (V, E)$ with nonnegative edge weights $w_{ij} \ge
 $\bar{S} = V \setminus S$ that maximizes the total weight of edges crossing the partition:
 
 $$
-\operatorname{MaxCut}(G) = \max_{S \subseteq V} \sum_{\substack{(i,j) \in E \\ i \in S, \, j \in \bar{S}}} w_{ij}
+\text{MaxCut}(G) = \max_{S \subseteq V} \sum_{\substack{(i,j) \in E \\ i \in S, \, j \in \bar{S}}} w_{ij}
 $$
 
 Max-Cut is NP-hard (Karp, 1972). No polynomial-time algorithm can solve it exactly unless
@@ -27,7 +27,7 @@ of the cut if and only if $x_i \neq x_j$, which happens when $x_i x_j = -1$. The
 for this event is $\frac{1 - x_i x_j}{2}$, giving:
 
 $$
-\operatorname{MaxCut}(G) = \max_{x \in \{-1,+1\}^n} \frac{1}{2} \sum_{(i,j) \in E} w_{ij} (1 - x_i x_j)
+\text{MaxCut}(G) = \max_{x \in \{-1,+1\}^n} \frac{1}{2} \sum_{(i,j) \in E} w_{ij} (1 - x_i x_j)
 $$
 
 This is an integer quadratic program — NP-hard to solve exactly.
@@ -118,13 +118,13 @@ elsewhere), with $b_i = 1$.
 
 ## 4. Random Hyperplane Rounding
 
-Given the SDP optimal solution $X^*$, the GW algorithm **rounds** the continuous solution to
+Given the SDP optimal solution $X^{*}$, the GW algorithm **rounds** the continuous solution to
 a discrete partition.
 
 ### Rounding Procedure
 
-1. Compute vectors $\mathbf{v}_1, \ldots, \mathbf{v}_n$ from $X^*$ via Cholesky:
-   $X^* = V^\top V$, and $\mathbf{v}_i$ is column $i$ of $V$.
+1. Compute vectors $\mathbf{v}_1, \ldots, \mathbf{v}_n$ from $X^{*}$ via Cholesky:
+   $X^{*} = V^\top V$, and $\mathbf{v}_i$ is column $i$ of $V$.
 2. Generate a random vector $\mathbf{r} \sim \mathcal{N}(0, I_n)$ (standard Gaussian in $\mathbb{R}^n$).
 3. Assign vertices to the partition:
 
@@ -140,7 +140,7 @@ Vertices whose vectors fall on opposite sides of this hyperplane are placed in d
 **Claim:** For any two unit vectors $\mathbf{u}, \mathbf{v} \in S^{n-1}$:
 
 $$
-\Pr_{\mathbf{r} \sim \mathcal{N}(0, I)}\left[\operatorname{sign}(\langle \mathbf{u}, \mathbf{r} \rangle) \neq \operatorname{sign}(\langle \mathbf{v}, \mathbf{r} \rangle)\right] = \frac{\arccos(\langle \mathbf{u}, \mathbf{v} \rangle)}{\pi}
+\Pr_{\mathbf{r} \sim \mathcal{N}(0, I)}\left[\text{sign}(\langle \mathbf{u}, \mathbf{r} \rangle) \neq \text{sign}(\langle \mathbf{v}, \mathbf{r} \rangle)\right] = \frac{\arccos(\langle \mathbf{u}, \mathbf{v} \rangle)}{\pi}
 $$
 
 **Proof:** The projections $\langle \mathbf{u}, \mathbf{r} \rangle$ and $\langle \mathbf{v}, \mathbf{r} \rangle$
@@ -152,7 +152,7 @@ where they disagree, which is $\theta / \pi$. $\square$
 ### Expected Cut Value
 
 $$
-\mathbb{E}[\text{cut}] = \sum_{(i,j) \in E} w_{ij} \cdot \frac{\arccos(X^*_{ij})}{\pi}
+\mathbb{E}[\text{cut}] = \sum_{(i,j) \in E} w_{ij} \cdot \frac{\arccos(X^{*}_{ij})}{\pi}
 $$
 
 ---
@@ -229,13 +229,13 @@ $$
 The equation $\tan(\theta/2) = \theta$ has a unique solution in $(0, \pi)$:
 
 $$
-\theta^* \approx 2.331122 \text{ radians} \approx 133.6°
+\theta^{*} \approx 2.331122 \text{ radians} \approx 133.6°
 $$
 
 **Computing $\alpha_{\text{GW}}$:**
 
 $$
-\alpha_{\text{GW}} = f(\theta^*) = \frac{2}{\pi} \cdot \frac{\theta^*}{1 - \cos \theta^*} \approx \frac{2}{\pi} \cdot \frac{2.331122}{1 - (-0.7254)} \approx \frac{2}{\pi} \cdot \frac{2.331122}{1.7254}
+\alpha_{\text{GW}} = f(\theta^{*}) = \frac{2}{\pi} \cdot \frac{\theta^{*}}{1 - \cos \theta^{*}} \approx \frac{2}{\pi} \cdot \frac{2.331122}{1 - (-0.7254)} \approx \frac{2}{\pi} \cdot \frac{2.331122}{1.7254}
 $$
 
 $$
@@ -253,9 +253,9 @@ $$
 **Proof:**
 
 $$
-\mathbb{E}[\text{cut}] = \sum_{(i,j) \in E} w_{ij} \cdot \frac{\arccos(X^*_{ij})}{\pi}
-\geq \sum_{(i,j) \in E} w_{ij} \cdot \alpha_{\text{GW}} \cdot \frac{1 - X^*_{ij}}{2}
-= \alpha_{\text{GW}} \cdot \frac{1}{4} \langle L, X^* \rangle
+\mathbb{E}[\text{cut}] = \sum_{(i,j) \in E} w_{ij} \cdot \frac{\arccos(X^{*}_{ij})}{\pi}
+\geq \sum_{(i,j) \in E} w_{ij} \cdot \alpha_{\text{GW}} \cdot \frac{1 - X^{*}_{ij}}{2}
+= \alpha_{\text{GW}} \cdot \frac{1}{4} \langle L, X^{*} \rangle
 = \alpha_{\text{GW}} \cdot \text{SDP}_{\text{OPT}}
 $$
 
@@ -292,12 +292,12 @@ and taking the best cut improves the probability of finding a good solution.
 
 ### Analysis
 
-Let $c^* = \alpha_{\text{GW}} \cdot \text{SDP}_{\text{OPT}}$. By Markov's inequality applied
+Let $c^{*} = \alpha_{\text{GW}} \cdot \text{SDP}_{\text{OPT}}$. By Markov's inequality applied
 to the complementary random variable, each trial independently has at least a constant
-probability $p > 0$ of producing a cut of value $\geq c^*$. After $k$ independent trials:
+probability $p > 0$ of producing a cut of value $\geq c^{*}$. After $k$ independent trials:
 
 $$
-\Pr[\text{best cut} < c^*] \leq (1 - p)^k
+\Pr[\text{best cut} < c^{*}] \leq (1 - p)^k
 $$
 
 For the failure probability to be at most $\delta$:
@@ -407,7 +407,7 @@ for each edge $(i, i+1 \mod 5)$.
 **SDP optimal value:**
 
 $$
-\text{SDP}_{\text{OPT}} = \frac{1}{4} \langle L, X^* \rangle = \frac{5}{4}(1 - \cos 144°) = \frac{5}{4}(1 + 0.8090) \approx \frac{5 \times 1.8090}{4} \approx 2.261 \times 2 = 4.523 / 2
+\text{SDP}_{\text{OPT}} = \frac{1}{4} \langle L, X^{*} \rangle = \frac{5}{4}(1 - \cos 144°) = \frac{5}{4}(1 + 0.8090) \approx \frac{5 \times 1.8090}{4} \approx 2.261 \times 2 = 4.523 / 2
 $$
 
 More precisely, with the objective $\frac{1}{2}\sum w_{ij}(1 - X_{ij})$:
@@ -460,7 +460,7 @@ is not too loose on this instance.
 | 1. Build graph Laplacian $L$ | `graph.rs` | `Graph::laplacian()` |
 | 2. Formulate SDP: $C = -\frac{1}{4}L$, constraints $X_{ii} = 1$ | `sdp/mod.rs` | `SdpProblem::maxcut_relaxation()` |
 | 3. Solve SDP via IPM | `sdp/solver.rs` | `Solver::solve()` |
-| 4. Extract vectors via Cholesky: $X^* = V^\top V$ | `maxcut/rounding.rs` | `extract_vectors()` |
+| 4. Extract vectors via Cholesky: $X^{*} = V^\top V$ | `maxcut/rounding.rs` | `extract_vectors()` |
 | 5. Random hyperplane rounding ($k$ trials) | `maxcut/rounding.rs` | `multi_round()` |
 | 6. Outward rotations (local search per trial) | `maxcut/rounding.rs` | `outward_rotations()` |
 | 7. Return best partition and approximation ratio | `maxcut/mod.rs` | `gw_maxcut()` |

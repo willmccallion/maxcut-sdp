@@ -3,10 +3,10 @@
 //! Verifies Cholesky, eigendecomposition, and full SDP solves against
 //! analytically known solutions.
 
-use gw_maxcut::graph::Graph;
-use gw_maxcut::sdp::linalg::DenseMatrix;
-use gw_maxcut::sdp::solver::{Solver, SolverConfig};
-use gw_maxcut::sdp::SdpProblem;
+use maxcut_sdp::graph::Graph;
+use maxcut_sdp::sdp::linalg::DenseMatrix;
+use maxcut_sdp::sdp::solver::{Solver, SolverConfig};
+use maxcut_sdp::sdp::SdpProblem;
 
 /// Cholesky of a known 2×2 SPD matrix.
 #[test]

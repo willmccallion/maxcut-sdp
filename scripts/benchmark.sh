@@ -8,7 +8,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-BIN="./target/release/gw-maxcut"
+BIN="./target/release/maxcut-sdp"
 cargo build --release 2>/dev/null
 
 # Best-known values from literature (BLS, CirCut, DSDP, etc.)

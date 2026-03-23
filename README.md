@@ -1,4 +1,4 @@
-# gw-maxcut
+# maxcut-sdp
 
 A from-scratch semidefinite programming (SDP) solver with Goemans-Williamson Max-Cut approximation, written in Rust.
 
@@ -25,7 +25,7 @@ Full mathematical derivations are in the `MATH.md` files:
 
 Tested on the [Gset benchmark suite](https://web.stanford.edu/~yyye/yyye/Gset/) (800–14,000 nodes). All cut values are independently verified. Best-known values are from BLS, MCPG, CirCut, and recent literature.
 
-| Instance | Nodes | Edges | Best Known | gw-maxcut | Gap | Time |
+| Instance | Nodes | Edges | Best Known | maxcut-sdp | Gap | Time |
 |----------|------:|------:|-----------:|----------:|----:|-----:|
 | G1       |   800 | 19,176 |     11,624 |    11,621 | 0.03% |   10s |
 | G11      |   800 |  1,600 |        564 |       556 | 1.42% |   10s |
@@ -53,31 +53,23 @@ Tested on the [Gset benchmark suite](https://web.stanford.edu/~yyye/yyye/Gset/) 
 
 ## Architecture
 
-```
-                    ┌─────────────────────────────────────────────┐
-                    │           SDP Relaxation                    │
-Graph ──→ Laplacian │  C = -(1/4)L,  X_ii = 1                   │
-                    │                                             │
-                    │  ┌─────────────┐    ┌────────────────────┐  │
-                    │  │  Dense IPM  │    │  Burer-Monteiro    │  │
-                    │  │  (n < 100)  │    │  X = RRᵀ (n > 100)│  │
-                    │  └──────┬──────┘    └─────────┬──────────┘  │
-                    └─────────┼─────────────────────┼─────────────┘
-                              ▼                     ▼
-                    ┌─────────────────────────────────────────────┐
-                    │         Rounding Pipeline                   │
-                    │                                             │
-                    │  Hyperplane Rounding (k trials, parallel)   │
-                    │         ▼                                   │
-                    │  Outward Rotations (Zwick 1999)             │
-                    │         ▼                                   │
-                    │  Iterated Local Search (variable perturb)   │
-                    │         ▼                                   │
-                    │  Population Refinement (--time budget)      │
-                    └────────────────────┬────────────────────────┘
-                                         ▼
-                              Max-Cut Partition
-                         (S, S̄, cut value, approx ratio)
+```mermaid
+graph TD
+    A["Graph G = (V, E)"] --> B["Laplacian L = D - W"]
+    B --> C["SDP Relaxation<br/>C = -(1/4)L, X_ii = 1"]
+
+    C --> D["Dense IPM<br/>n &lt; 100"]
+    C --> E["Burer-Monteiro<br/>X = RR&#7488;, n &gt; 100"]
+
+    D --> F["Rounding Pipeline"]
+    E --> F
+
+    F --> G["Hyperplane Rounding<br/>k trials, parallel"]
+    G --> H["Outward Rotations<br/>Zwick 1999"]
+    H --> I["Iterated Local Search<br/>variable perturbation"]
+    I --> J["Population Refinement<br/>--time budget"]
+
+    J --> K["Max-Cut Partition<br/>S, S&#772;, cut value, approx ratio"]
 ```
 
 ## Build & Run
@@ -87,13 +79,13 @@ Graph ──→ Laplacian │  C = -(1/4)L,  X_ii = 1                   │
 cargo build --release
 
 # Run on a graph file (auto-detects format)
-./target/release/gw-maxcut graph.txt --solver bm
+./target/release/maxcut-sdp graph.txt --solver bm
 
 # Time-budgeted solve (recommended for large instances)
-./target/release/gw-maxcut graph.txt --solver bm --time 300
+./target/release/maxcut-sdp graph.txt --solver bm --time 300
 
 # Run with exact comparison (small graphs only)
-./target/release/gw-maxcut graph.txt --solver ipm --exact
+./target/release/maxcut-sdp graph.txt --solver ipm --exact
 
 # Reproduce benchmarks
 ./scripts/benchmark.sh > results/gset.csv

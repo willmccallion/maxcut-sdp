@@ -250,16 +250,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gw-maxcut"
-version = "0.1.0"
-dependencies = [
- "clap",
- "criterion",
- "rand",
- "rayon",
-]
-
-[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -329,6 +319,16 @@ name = "libc"
 version = "0.2.183"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
+
+[[package]]
+name = "maxcut-sdp"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "criterion",
+ "rand",
+ "rayon",
+]
 
 [[package]]
 name = "memchr"

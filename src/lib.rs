@@ -1,4 +1,4 @@
-//! # gw-maxcut
+//! # maxcut-sdp
 //!
 //! A from-scratch semidefinite programming (SDP) solver with Goemans-Williamson
 //! Max-Cut approximation.
@@ -27,7 +27,7 @@ pub use maxcut::MaxCutResult;
 pub use sdp::solver_bm::{BmSolution, BmSolver, BmSolverConfig};
 pub use sdp::{SdpProblem, SdpSolution};
 
-/// Errors that can occur throughout the gw-maxcut pipeline.
+/// Errors that can occur throughout the maxcut-sdp pipeline.
 #[derive(Debug)]
 pub enum GwError {
     /// The graph is invalid (e.g., self-loop, out-of-range vertex index).

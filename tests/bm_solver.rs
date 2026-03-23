@@ -1,8 +1,8 @@
 //! Integration tests for the Burer-Monteiro Max-Cut solver.
 
-use gw_maxcut::graph::Graph;
-use gw_maxcut::maxcut::{GwBmConfig, GwConfig, gw_maxcut, gw_maxcut_bm};
-use gw_maxcut::sdp::solver_bm::BmSolverConfig;
+use maxcut_sdp::graph::Graph;
+use maxcut_sdp::maxcut::{GwBmConfig, GwConfig, gw_maxcut, gw_maxcut_bm};
+use maxcut_sdp::sdp::solver_bm::BmSolverConfig;
 
 /// Helper: build the 5-cycle C_5 with unit weights (OPT = 4).
 fn five_cycle() -> Graph {

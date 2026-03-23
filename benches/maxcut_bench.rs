@@ -1,8 +1,8 @@
-//! Criterion benchmarks for the gw-maxcut pipeline.
+//! Criterion benchmarks for the maxcut-sdp pipeline.
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use gw_maxcut::bench::{generate_complete_graph, generate_cycle};
-use gw_maxcut::sdp::linalg::DenseMatrix;
+use maxcut_sdp::bench::{generate_complete_graph, generate_cycle};
+use maxcut_sdp::sdp::linalg::DenseMatrix;
 
 fn bench_cholesky(c: &mut Criterion) {
     let mut group = c.benchmark_group("cholesky");

@@ -23,7 +23,7 @@ $$
 
 where:
 - $X, C, A_i \in \mathbb{S}^n$ are $n \times n$ real symmetric matrices
-- $\langle A, B \rangle = \operatorname{tr}(A^\top B) = \sum_{j,k} A_{jk} B_{jk}$ is the matrix inner product
+- $\langle A, B \rangle = \text{tr}(A^\top B) = \sum_{j,k} A_{jk} B_{jk}$ is the matrix inner product
 - $X \succeq 0$ means $X$ is positive semidefinite (all eigenvalues $\geq 0$)
 - $b \in \mathbb{R}^m$ is the constraint right-hand side
 
@@ -183,7 +183,7 @@ $$
 where the **Schur complement matrix** $M \in \mathbb{R}^{m \times m}$ has entries:
 
 $$
-M_{ij} = \langle A_i, W A_j W \rangle = \operatorname{tr}(A_i W A_j W)
+M_{ij} = \langle A_i, W A_j W \rangle = \text{tr}(A_i W A_j W)
 $$
 
 and the right-hand side $h \in \mathbb{R}^m$ has entries:
@@ -264,12 +264,12 @@ $$
 \begin{aligned}
 \text{Duality gap:} \quad & \frac{\langle X, S \rangle}{1 + |\langle C, X \rangle|} < \varepsilon \\
 \text{Primal infeasibility:} \quad & \frac{\|b - \mathcal{A}(X)\|_2}{1 + \|b\|_2} < \varepsilon \\
-\text{Dual infeasibility:} \quad & \frac{\|C - \mathcal{A}^*(y) - S\|_F}{1 + \|C\|_F} < \varepsilon
+\text{Dual infeasibility:} \quad & \frac{\|C - \mathcal{A}^{*}(y) - S\|_F}{1 + \|C\|_F} < \varepsilon
 \end{aligned}
 $$
 
 where $\mathcal{A}(X) = (\langle A_1, X \rangle, \ldots, \langle A_m, X \rangle)^\top$ and
-$\mathcal{A}^*(y) = \sum_i y_i A_i$. Typical tolerance: $\varepsilon = 10^{-8}$.
+$\mathcal{A}^{*}(y) = \sum_i y_i A_i$. Typical tolerance: $\varepsilon = 10^{-8}$.
 
 ### 3.8 Complete Algorithm
 
@@ -320,14 +320,14 @@ Minimizing $x_{11} + x_{22}$ subject to $x_{11} x_{22} \geq 1$: by AM-GM,
 $x_{11} + x_{22} \geq 2\sqrt{x_{11} x_{22}} \geq 2$, with equality at $x_{11} = x_{22} = 1$.
 
 $$
-X^* = \begin{pmatrix} 1 & 1 \\ 1 & 1 \end{pmatrix}, \quad \text{optimal value} = 2
+X^{*} = \begin{pmatrix} 1 & 1 \\ 1 & 1 \end{pmatrix}, \quad \text{optimal value} = 2
 $$
 
-Note that $X^*$ is PSD (eigenvalues $0$ and $2$) but not PD — it lies on the boundary.
+Note that $X^{*}$ is PSD (eigenvalues $0$ and $2$) but not PD — it lies on the boundary.
 
 **Dual:** $\max \, 2y_1$ subject to $C - y_1 A_1 = I - y_1 \begin{pmatrix} 0 & 1 \\ 1 & 0 \end{pmatrix} \succeq 0$.
 This requires $1 - y_1^2 \geq 0$ (from the determinant condition), so $|y_1| \leq 1$.
-Maximizing $2y_1$: $y_1^* = 1$, dual optimal $= 2$. Zero duality gap confirms strong duality.
+Maximizing $2y_1$: $y_1^{*} = 1$, dual optimal $= 2$. Zero duality gap confirms strong duality.
 
 **IPM iteration (sketch):**
 
@@ -337,8 +337,8 @@ Starting from $X = 2I$, $S = 2I$, $y = 0$, $\mu = 4$:
   Compute NT scaling $W$, Schur complement (scalar: $m = 1$), solve for $\Delta y$.
   After step: $x_{12}$ moves toward $1$, gap decreases.
 
-- **Iterations 2–10:** $\mu$ decreases geometrically. $X$ converges to $X^*$, $S$ converges
-  to $S^* = \begin{pmatrix} 1 & -1 \\ -1 & 1 \end{pmatrix}$, gap $\to 0$.
+- **Iterations 2–10:** $\mu$ decreases geometrically. $X$ converges to $X^{*}$, $S$ converges
+  to $S^{*} = \begin{pmatrix} 1 & -1 \\ -1 & 1 \end{pmatrix}$, gap $\to 0$.
 
 Typically converges in $\sim 10\text{–}15$ iterations to $\varepsilon = 10^{-8}$.
 
@@ -384,7 +384,7 @@ section of this document where it appears.
 | Cholesky factorization $A = LL^\top$ | §3.3 (NT scaling), §3.4 (Schur solve) | Fails iff $A$ is not positive definite |
 | Forward/back substitution $Lx = b$, $L^\top x = b$ | §3.4 (Schur solve) | $O(n^2)$ per solve |
 | Matrix multiply $AB$ | §3.3 (forming $WAW$), §3.4 | $O(n^3)$ naive, can optimize later |
-| Trace inner product $\langle A, B \rangle = \operatorname{tr}(A^\top B)$ | §3.4 (Schur entries) | $O(n^2)$, just sum element products |
+| Trace inner product $\langle A, B \rangle = \text{tr}(A^\top B)$ | §3.4 (Schur entries) | $O(n^2)$, just sum element products |
 | Eigendecomposition $A = Q \Lambda Q^\top$ | §3.3 (NT scaling), §3.5 (step size) | Symmetric matrices only; Jacobi or QR |
 | Minimum eigenvalue $\lambda_{\min}(A)$ | §3.5 (step size) | Can use inverse power iteration |
 | Log-determinant $\ln \det(A) = 2 \sum_i \ln L_{ii}$ | §3.1 (barrier) | Via Cholesky diagonal |
@@ -420,12 +420,12 @@ satisfied since $VV^\top$ is always positive semidefinite.
 
 ### 7.2 Rank Selection (Barvinok-Pataki Bound)
 
-The Barvinok-Pataki bound states that the SDP has an optimal solution $X^*$ with
-$\operatorname{rank}(X^*) = r^*$ satisfying $\binom{r^*+1}{2} \leq m$ (the number of
+The Barvinok-Pataki bound states that the SDP has an optimal solution $X^{*}$ with
+$\text{rank}(X^{*}) = r^{*}$ satisfying $\binom{r^{*}+1}{2} \leq m$ (the number of
 constraints). For Max-Cut, $m = n$ (one diagonal constraint per vertex), so
-$r^* \leq \lceil\sqrt{2n}\rceil$.
+$r^{*} \leq \lceil\sqrt{2n}\rceil$.
 
-Using $r \geq r^*$ guarantees that the BM formulation can represent the SDP optimum.
+Using $r \geq r^{*}$ guarantees that the BM formulation can represent the SDP optimum.
 
 ### 7.3 No Spurious Local Minima
 
@@ -458,7 +458,7 @@ where $L$ is the graph Laplacian. The **Riemannian gradient** is the projection 
 $\nabla f$ onto the tangent space:
 
 $$
-\operatorname{grad} f(V)_i = \nabla f(V)_i - \langle \nabla f(V)_i, v_i \rangle \, v_i
+\text{grad} f(V)_i = \nabla f(V)_i - \langle \nabla f(V)_i, v_i \rangle \, v_i
 $$
 
 This subtracts the normal component so the gradient lies in the tangent space.
@@ -480,11 +480,11 @@ This is the key to scalability: per-iteration cost scales with graph sparsity, n
 
 ### 7.7 Retraction
 
-After taking a step $V' = V - \alpha \cdot \operatorname{grad} f(V)$ in the tangent space,
+After taking a step $V' = V - \alpha \cdot \text{grad} f(V)$ in the tangent space,
 the result no longer lies on $\mathcal{M}$. The **retraction** maps it back:
 
 $$
-\operatorname{Retr}(V')_i = \frac{v'_i}{\|v'_i\|}
+\text{Retr}(V')_i = \frac{v'_i}{\|v'_i\|}
 $$
 
 This is the simplest retraction on the sphere (normalization), with $O(n \cdot r)$ cost.
@@ -494,7 +494,7 @@ This is the simplest retraction on the sphere (normalization), with $O(n \cdot r
 Step size selection uses standard Armijo backtracking adapted for manifolds:
 
 1. Start with step size $\alpha$ (try growing from previous: $\alpha \leftarrow \min(\alpha/\beta, \alpha_0)$)
-2. Compute trial point $V' = \operatorname{Retr}(V - \alpha \cdot g)$ where $g = \operatorname{grad} f(V)$
+2. Compute trial point $V' = \text{Retr}(V - \alpha \cdot g)$ where $g = \text{grad} f(V)$
 3. Accept if $f(V') \leq f(V) - c_1 \alpha \|g\|_F^2$ (sufficient decrease)
 4. Otherwise shrink: $\alpha \leftarrow \beta \alpha$ and repeat
 
