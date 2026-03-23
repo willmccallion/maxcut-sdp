@@ -59,7 +59,7 @@ graph TD
     B --> C["SDP Relaxation<br/>C = -(1/4)L, X_ii = 1"]
 
     C --> D["Dense IPM<br/>n &lt; 100"]
-    C --> E["Burer-Monteiro<br/>X = RR&#7488;, n &gt; 100"]
+    C --> E["Burer-Monteiro<br/>X = RRᵀ, n &gt; 100"]
 
     D --> F["Rounding Pipeline"]
     E --> F
@@ -69,7 +69,7 @@ graph TD
     H --> I["Iterated Local Search<br/>variable perturbation"]
     I --> J["Population Refinement<br/>--time budget"]
 
-    J --> K["Max-Cut Partition<br/>S, S&#772;, cut value, approx ratio"]
+    J --> K["Max-Cut Partition<br/>S, S̄, cut value, approx ratio"]
 ```
 
 ## Build & Run
