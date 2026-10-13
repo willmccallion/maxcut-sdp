@@ -61,8 +61,10 @@ impl Solver {
     ///
     /// # Errors
     ///
-    /// Returns [`GwError::SolverFailed`] if the solver fails to converge or
-    /// encounters a numerical issue (e.g., Cholesky failure during iteration).
+    /// Returns [`GwError::SolverFailed`] on a numerical failure (e.g., Cholesky
+    /// failure during iteration). Reaching `config.max_iterations` is not an
+    /// error: the last iterate is returned, and its `duality_gap` says how close
+    /// it got.
     pub fn solve(&self, problem: &SdpProblem) -> Result<SdpSolution, GwError> {
         let n = problem.n;
         let m = problem.constraints.len();
@@ -128,10 +130,11 @@ impl Solver {
         })
     }
 
-    /// Computes the initial strictly feasible point `(X, y, S)`.
+    /// Computes the starting point `(X, y, S)`.
     ///
-    /// Uses a simple heuristic: `X = I`, `y = 0`, `S = C + αI` where `α` is
-    /// chosen to make `S` strictly positive definite.
+    /// `X = I` satisfies the primal constraints and `S = C + αI` is positive
+    /// definite, but with `y = 0` the shift leaves the dual infeasible; the
+    /// search direction drives that dual residual to zero.
     ///
     /// # Errors
     ///
