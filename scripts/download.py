@@ -8,10 +8,8 @@ import urllib.error
 
 GRAPH_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "graphs")
 
-# ---------------------------------------------------------------------------
 # BiqMac Library  https://biqmac.aau.at/biqmaclib.html
 # Format: first line "n m", then "i j w" (1-indexed) — our parse_biqmac.
-# ---------------------------------------------------------------------------
 BIQMAC_RUDY = "https://biqmac.aau.at/library/mac/rudy"
 BIQMAC_ISING = "https://biqmac.aau.at/library/mac/ising"
 
@@ -47,10 +45,8 @@ ISING_INSTANCES = {
     "ising3.0-100_5555": 100,
 }
 
-# ---------------------------------------------------------------------------
 # Gset  https://web.stanford.edu/~yyye/yyye/Gset/
 # Larger instances (n=800–10000). Same sparse format (1-indexed).
-# ---------------------------------------------------------------------------
 GSET_BASE = "https://web.stanford.edu/~yyye/yyye/Gset"
 
 GSET_INSTANCES = {

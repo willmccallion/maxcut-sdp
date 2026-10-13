@@ -48,10 +48,6 @@ impl std::fmt::Debug for DenseMatrix {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Private helpers — branchless index arithmetic, hot-loop kernels
-// ---------------------------------------------------------------------------
-
 /// Column-major index. Inlined everywhere so the compiler folds it into LEA.
 #[inline(always)]
 const fn idx(i: usize, j: usize, rows: usize) -> usize {
@@ -414,10 +410,6 @@ impl DenseMatrix {
         Ok(dot(&self.data, &other.data))
     }
 
-    // -----------------------------------------------------------------------
-    // Cholesky factorization and solves
-    // -----------------------------------------------------------------------
-
     /// Computes the Cholesky factorization `self = L L^T`.
     ///
     /// Returns the lower-triangular factor `L`. The input must be symmetric
@@ -578,10 +570,6 @@ impl DenseMatrix {
 
         Ok(())
     }
-
-    // -----------------------------------------------------------------------
-    // Eigendecomposition (Jacobi method with cyclic sweeps)
-    // -----------------------------------------------------------------------
 
     /// Computes the eigendecomposition `self = Q Λ Q^T` of a symmetric matrix.
     ///
@@ -773,10 +761,6 @@ impl DenseMatrix {
             .ok_or_else(|| GwError::InvalidMatrix("empty matrix".to_string()))
     }
 
-    // -----------------------------------------------------------------------
-    // Matrix function via eigendecomposition: Q f(Λ) Q^T
-    // -----------------------------------------------------------------------
-
     /// Applies a scalar function `f` to the eigenvalues: `Q diag(f(λ_i)) Q^T`.
     ///
     /// This is the core primitive for `sqrt_spd`, `inv_sqrt_spd`, etc.
@@ -875,10 +859,6 @@ impl DenseMatrix {
         })
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

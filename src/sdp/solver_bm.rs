@@ -300,10 +300,6 @@ impl BmSolver {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Sparse primitives — O(|E|·r) per call
-// ---------------------------------------------------------------------------
-
 /// Computes the BM objective via the dot-product identity — O(|E|·r).
 ///
 /// For unit vectors, `‖vi − vj‖² = 2(1 − ⟨vi, vj⟩)`, so
