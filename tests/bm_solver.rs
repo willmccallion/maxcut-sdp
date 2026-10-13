@@ -4,7 +4,7 @@ use maxcut_sdp::graph::Graph;
 use maxcut_sdp::maxcut::{GwBmConfig, GwConfig, gw_maxcut, gw_maxcut_bm};
 use maxcut_sdp::sdp::solver_bm::BmSolverConfig;
 
-/// Helper: build the 5-cycle C_5 with unit weights (OPT = 4).
+/// Helper: build the 5-cycle `C_5` with unit weights (OPT = 4).
 fn five_cycle() -> Graph {
     let mut g = Graph::new(5);
     let _ = g.add_edge(0, 1, 1.0);
@@ -15,7 +15,7 @@ fn five_cycle() -> Graph {
     g
 }
 
-/// Helper: build K_4 with unit weights (OPT = 4).
+/// Helper: build `K_4` with unit weights (OPT = 4).
 fn k4() -> Graph {
     let mut g = Graph::new(4);
     let _ = g.add_edge(0, 1, 1.0);
@@ -27,7 +27,7 @@ fn k4() -> Graph {
     g
 }
 
-/// Full GW pipeline with BM on C5: cut >= α_GW · OPT.
+/// Full GW pipeline with BM on C5: cut >= `α_GW` · OPT.
 #[test]
 fn bm_five_cycle_gw_guarantee() {
     let g = five_cycle();
@@ -56,7 +56,7 @@ fn bm_five_cycle_gw_guarantee() {
     );
 }
 
-/// BM on K4: cut >= α_GW · 4.
+/// BM on K4: cut >= `α_GW` · 4.
 #[test]
 fn bm_k4_gw_guarantee() {
     let g = k4();

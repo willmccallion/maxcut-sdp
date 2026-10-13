@@ -68,7 +68,7 @@ fn identity_properties() {
 }
 
 /// Solve the 2×2 SDP from MATH.md §4:
-/// min x_11 + x_22  s.t.  x_12 = 1, X ≽ 0
+/// min `x_11` + `x_22`  s.t.  `x_12` = 1, X ≽ 0
 /// Optimal value = 2, X* = [[1,1],[1,1]]
 #[test]
 fn sdp_2x2_worked_example() {
@@ -90,7 +90,7 @@ fn sdp_2x2_worked_example() {
     assert!(solution.duality_gap < 1e-6);
 }
 
-/// Max-Cut SDP on the triangle: SDP_OPT ≥ OPT = 2.
+/// Max-Cut SDP on the triangle: `SDP_OPT` ≥ OPT = 2.
 #[test]
 fn maxcut_sdp_triangle() {
     let mut g = Graph::new(3);

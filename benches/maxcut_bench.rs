@@ -1,4 +1,5 @@
 //! Criterion benchmarks for the maxcut-sdp pipeline.
+#![allow(missing_docs, reason = "criterion_group! generates an undocumented pub fn")]
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use maxcut_sdp::bench::{generate_complete_graph, generate_cycle};
@@ -19,7 +20,7 @@ fn bench_cholesky(c: &mut Criterion) {
         }
         let m = DenseMatrix::from_vec(n, n, data).unwrap_or_else(|_| panic!("from_vec failed"));
 
-        group.bench_function(&id, |b| {
+        let _ = group.bench_function(&id, |b| {
             b.iter(|| {
                 let _ = m.cholesky();
             });
@@ -32,7 +33,7 @@ fn bench_laplacian(c: &mut Criterion) {
     let mut group = c.benchmark_group("laplacian");
     for &n in &[5, 10, 20, 50] {
         let g = generate_complete_graph(n);
-        group.bench_function(&format!("K{n}"), |b| {
+        let _ = group.bench_function(format!("K{n}"), |b| {
             b.iter(|| {
                 let _ = g.laplacian();
             });
@@ -46,7 +47,7 @@ fn bench_eigenvalues(c: &mut Criterion) {
     for &n in &[5, 10, 20] {
         let g = generate_cycle(n);
         let l = g.laplacian();
-        group.bench_function(&format!("C{n}_laplacian"), |b| {
+        let _ = group.bench_function(format!("C{n}_laplacian"), |b| {
             b.iter(|| {
                 let _ = l.eigenvalues_symmetric();
             });

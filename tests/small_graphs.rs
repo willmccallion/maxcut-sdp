@@ -7,7 +7,7 @@ use maxcut_sdp::graph::Graph;
 use maxcut_sdp::maxcut::exact::exact_maxcut;
 use maxcut_sdp::maxcut::{gw_maxcut, GwConfig};
 
-/// Triangle (K_3) with unit weights: OPT = 2 (cut any single vertex off).
+/// Triangle (`K_3`) with unit weights: OPT = 2 (cut any single vertex off).
 #[test]
 fn triangle_exact() {
     let mut g = Graph::new(3);
@@ -21,7 +21,7 @@ fn triangle_exact() {
     assert!((result.cut_value - 2.0).abs() < 1e-10);
 }
 
-/// 4-cycle (C_4) with unit weights: OPT = 4 (bipartite, all edges cut).
+/// 4-cycle (`C_4`) with unit weights: OPT = 4 (bipartite, all edges cut).
 #[test]
 fn four_cycle_exact() {
     let mut g = Graph::new(4);
@@ -36,7 +36,7 @@ fn four_cycle_exact() {
     assert!((result.cut_value - 4.0).abs() < 1e-10);
 }
 
-/// 5-cycle (C_5) with unit weights: OPT = 4 (odd cycle, one edge uncut).
+/// 5-cycle (`C_5`) with unit weights: OPT = 4 (odd cycle, one edge uncut).
 #[test]
 fn five_cycle_exact() {
     let mut g = Graph::new(5);
@@ -52,7 +52,7 @@ fn five_cycle_exact() {
     assert!((result.cut_value - 4.0).abs() < 1e-10);
 }
 
-/// Complete graph K_4 with unit weights: OPT = 4.
+/// Complete graph `K_4` with unit weights: OPT = 4.
 #[test]
 fn k4_exact() {
     let mut g = Graph::new(4);
@@ -81,7 +81,7 @@ fn single_edge_exact() {
     assert!((result.cut_value - 1.0).abs() < 1e-10);
 }
 
-/// GW on the 5-cycle should achieve at least α_GW · OPT ≈ 0.878 · 4 ≈ 3.51.
+/// GW on the 5-cycle should achieve at least `α_GW` · OPT ≈ 0.878 · 4 ≈ 3.51.
 #[test]
 fn five_cycle_gw() {
     let mut g = Graph::new(5);

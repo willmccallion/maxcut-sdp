@@ -499,7 +499,7 @@ mod tests {
     use super::*;
     use crate::graph::Graph;
 
-    /// Helper: build K_3 (triangle with unit weights).
+    /// Helper: build `K_3` (triangle with unit weights).
     fn triangle() -> Graph {
         let mut g = Graph::new(3);
         let _ = g.add_edge(0, 1, 1.0);

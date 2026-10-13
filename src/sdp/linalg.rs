@@ -451,7 +451,7 @@ impl DenseMatrix {
                 let l_jk = d[idx(j, k, n)];
                 // Subtract l_jk * L[j:n, k] from L[j:n, j]
                 for i in j..n {
-                    d[idx(i, j, n)] -= l_jk * d[idx(i, k, n)];
+                    d[idx(i, j, n)] = l_jk.mul_add(-d[idx(i, k, n)], d[idx(i, j, n)]);
                 }
             }
 
@@ -494,14 +494,14 @@ impl DenseMatrix {
             x[j] /= d[idx(j, j, n)];
             let xj = x[j];
             for i in (j + 1)..n {
-                x[i] -= d[idx(i, j, n)] * xj;
+                x[i] = d[idx(i, j, n)].mul_add(-xj, x[i]);
             }
         }
 
         // Back substitution: L^T x = y
         for j in (0..n).rev() {
             for i in (j + 1)..n {
-                x[j] -= d[idx(i, j, n)] * x[i];
+                x[j] = d[idx(i, j, n)].mul_add(-x[i], x[j]);
             }
             x[j] /= d[idx(j, j, n)];
         }
@@ -534,7 +534,7 @@ impl DenseMatrix {
                 b_col[j] /= ld[idx(j, j, n)];
                 let val = b_col[j];
                 for i in (j + 1)..n {
-                    b_col[i] -= ld[idx(i, j, n)] * val;
+                    b_col[i] = ld[idx(i, j, n)].mul_add(-val, b_col[i]);
                 }
             }
         }
@@ -562,7 +562,7 @@ impl DenseMatrix {
             let b_col = col_mut(&mut b.data, c, n);
             for j in (0..n).rev() {
                 for i in (j + 1)..n {
-                    b_col[j] -= ld[idx(i, j, n)] * b_col[i];
+                    b_col[j] = ld[idx(i, j, n)].mul_add(-b_col[i], b_col[j]);
                 }
                 b_col[j] /= ld[idx(j, j, n)];
             }
@@ -609,7 +609,7 @@ impl DenseMatrix {
             for j in 0..n {
                 for i in (j + 1)..n {
                     let v = a[idx(i, j, n)];
-                    off_norm += 2.0 * v * v;
+                    off_norm = (2.0 * v).mul_add(v, off_norm);
                 }
             }
             off_norm = off_norm.sqrt();

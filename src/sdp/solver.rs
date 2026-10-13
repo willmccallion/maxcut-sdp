@@ -103,7 +103,7 @@ impl Solver {
             s.add_assign(&scaled_ds)
                 .map_err(|e| GwError::SolverFailed(format!("S update: {e}")))?;
             for i in 0..m {
-                y[i] += alpha * dy[i];
+                y[i] = alpha.mul_add(dy[i], y[i]);
             }
         }
 
@@ -492,7 +492,7 @@ fn symmetrize(a: &mut DenseMatrix) {
         for j in (i + 1)..n {
             let ij = i + j * n;
             let ji = j + i * n;
-            let avg = 0.5 * (d[ij] + d[ji]);
+            let avg = f64::midpoint(d[ij], d[ji]);
             d[ij] = avg;
             d[ji] = avg;
         }
