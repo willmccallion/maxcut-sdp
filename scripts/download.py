@@ -57,8 +57,16 @@ GSET_INSTANCES = {
     "G14": 800,
     "G22": 2000,
     "G43": 1000,
+    "G35": 2000,
     "G48": 3000,
     "G55": 5000,
+    "G58": 5000,
+    "G60": 7000,
+    "G63": 7000,
+    "G67": 10000,
+    "G70": 10000,
+    "G77": 14000,
+    "G81": 20000,
 }
 
 # Known best cut values for verification.
@@ -84,6 +92,9 @@ def download(url: str, dest: str) -> bool:
         req = urllib.request.Request(url, headers={"User-Agent": "gw-maxcut-bench/0.1"})
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = resp.read()
+        if not data:
+            print("FAILED (empty response)", file=sys.stderr)
+            return False
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         with open(dest, "wb") as f:
             f.write(data)
@@ -99,7 +110,7 @@ def fetch_set(label: str, base_url: str, instances: dict, subdir: str):
     ok = fail = skip = 0
     for name, n in instances.items():
         dest = os.path.join(GRAPH_DIR, subdir, name + ".txt")
-        if os.path.exists(dest):
+        if os.path.exists(dest) and os.path.getsize(dest) > 0:
             print(f"  [skip] {name:25s} n={n}")
             skip += 1
             continue
@@ -170,7 +181,7 @@ def main():
         fetch_set("BiqMac / Ising", BIQMAC_ISING, subset, "ising")
 
     if args.source in ("gset", "all"):
-        print("\n  NOTE: Gset graphs are large (n=800–5000).")
+        print("\n  NOTE: Gset graphs are large (n=800–20000).")
         print("  Dense SDP solver handles n<~100; larger needs Burer-Monteiro.\n")
         fetch_set("Gset", GSET_BASE, GSET_INSTANCES, "gset")
 

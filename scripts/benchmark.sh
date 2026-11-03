@@ -35,9 +35,12 @@ time_budget() {
 
 echo "graph,nodes,edges,solver,time_s,sdp_bound,cut_value,best_known,gap_pct"
 
-for f in scripts/graphs/gset/G{1,11,14,22,35,43,48,55,58,60,63,67,70,77,81}; do
-    [ -f "$f" ] || continue
-    name=$(basename "$f")
+for f in scripts/graphs/gset/G{1,11,14,22,35,43,48,55,58,60,63,67,70,77,81}.txt; do
+    if [ ! -f "$f" ]; then
+        >&2 echo "missing $f (run scripts/download.py gset)"
+        continue
+    fi
+    name=$(basename "$f" .txt)
     bk=${BEST_KNOWN[$name]:-0}
 
     # Read node count from first line to pick time budget.
