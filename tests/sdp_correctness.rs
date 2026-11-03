@@ -3,6 +3,7 @@
 //! Verifies Cholesky, eigendecomposition, and full SDP solves against
 //! analytically known solutions.
 
+use maxcut_sdp::GwError;
 use maxcut_sdp::graph::Graph;
 use maxcut_sdp::sdp::SdpProblem;
 use maxcut_sdp::sdp::linalg::DenseMatrix;
@@ -144,4 +145,45 @@ fn maxcut_sdp_feasibility() {
     for &e in &eigs {
         assert!(e > -1e-6);
     }
+}
+
+fn odd_cycle(n: usize) -> Graph {
+    let mut g = Graph::new(n);
+    for i in 0..n {
+        let _ = g.add_edge(i, (i + 1) % n, 1.0);
+    }
+    g
+}
+
+/// The Max-Cut SDP value of the odd cycle `C_n` is `(n/2)(1 + cos(π/n))`.
+#[test]
+fn ipm_reaches_the_sdp_value_of_a_61_cycle() {
+    let n = 61;
+    let problem = SdpProblem::maxcut_relaxation(&odd_cycle(n))
+        .unwrap_or_else(|_| panic!("maxcut_relaxation failed"));
+    let expected = (n as f64 / 2.0) * (1.0 + (std::f64::consts::PI / n as f64).cos());
+
+    let solution = Solver::new(SolverConfig::default())
+        .solve(&problem)
+        .unwrap_or_else(|e| panic!("solver failed: {e}"));
+
+    let bound = -solution.dual_obj;
+    assert!(
+        (bound - expected).abs() / expected < 1e-6,
+        "bound {bound}, expected {expected}"
+    );
+}
+
+#[test]
+fn stopping_before_convergence_is_an_error() {
+    let problem = SdpProblem::maxcut_relaxation(&odd_cycle(5))
+        .unwrap_or_else(|_| panic!("maxcut_relaxation failed"));
+    let solver = Solver::new(SolverConfig {
+        max_iterations: 1,
+        ..SolverConfig::default()
+    });
+
+    let result = solver.solve(&problem);
+
+    assert!(matches!(result, Err(GwError::SolverFailed(_))));
 }

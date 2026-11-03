@@ -121,8 +121,9 @@ pub fn gw_maxcut(graph: &Graph, config: &GwConfig) -> Result<MaxCutResult, GwErr
     let solver = Solver::new(config.solver_config.clone());
     let solution = solver.solve(&problem)?;
 
-    // SDP bound: the Max-Cut objective is max (1/4) tr(LX) = -tr(CX).
-    let sdp_bound = -solution.primal_obj;
+    // The Max-Cut SDP maximizes (1/4) tr(LX) = -tr(CX); the dual objective of
+    // the converged, dual-feasible iterate bounds it from above.
+    let sdp_bound = -solution.dual_obj;
 
     // 3. Round with random hyperplanes.
     let mut rng = config

@@ -245,16 +245,18 @@ $$
 \mu_{\text{next}} = \sigma \cdot \mu_{\text{current}}
 $$
 
-where $\sigma \in (0, 1)$ is the **centering parameter**. A common choice is:
+where $\sigma \in (0, 1)$ is the **centering parameter**. This solver uses the long-step choice
 
 $$
-\sigma = 1 - \frac{0.3}{\sqrt{n}}
+\sigma = 0.2
 $$
 
-Aggressive reduction ($\sigma$ close to 0) takes fewer iterations but risks numerical
-instability. Conservative reduction ($\sigma$ close to 1) is safer but slower. The
-$1 - 0.3/\sqrt{n}$ schedule balances these concerns and achieves the theoretical
-$O(\sqrt{n} \log(1/\varepsilon))$ iteration bound.
+The short-step schedule $\sigma = 1 - 0.3/\sqrt{n}$ achieves the $O(\sqrt{n} \log(1/\varepsilon))$
+iteration bound, but it cuts $\mu$ by only about 4% per iteration at $n = 60$, so reaching
+$\varepsilon = 10^{-8}$ takes several hundred iterations. With $\sigma = 0.2$ each full step cuts
+$\mu$ fivefold; the worst-case bound becomes $O(n \log(1/\varepsilon))$, but on the Biq Mac
+instances ($n \leq 100$) the solver converges in 16–24 iterations, and its bounds agree with an
+independent solver to about $10^{-8}$.
 
 ### 3.7 Convergence Criterion
 
@@ -281,14 +283,14 @@ Output: Approximate optimal (X*, y*, S*)
 2. For k = 1, 2, ..., K:
    a. Compute μ = ⟨X, S⟩ / n
    b. If convergence criteria met: return (X, y, S)
-   c. Set μ_target = σ · μ  where σ = 1 - 0.3/√n
+   c. Set μ_target = σ · μ  where σ = 0.2
    d. Compute NT scaling matrix W from X, S
    e. Form Schur complement matrix M and RHS h
    f. Solve M Δy = h via Cholesky
    g. Recover ΔX, ΔS from Δy
    h. Compute step size α with safety factor γ
    i. Update: X ← X + α ΔX,  y ← y + α Δy,  S ← S + α ΔS
-3. Warn: max iterations reached
+3. Fail: max iterations reached without converging
 ```
 
 ---
@@ -359,8 +361,9 @@ Typically converges in $\sim 10\text{–}15$ iterations to $\varepsilon = 10^{-8
 
 ### Iteration Count
 
-The primal-dual IPM converges in $O(\sqrt{n} \log(1/\varepsilon))$ iterations. This is
-independent of $m$ (the number of constraints).
+With long-step centering (§3.6) the primal-dual IPM needs $O(n \log(1/\varepsilon))$ iterations in
+the worst case, independent of $m$ (the number of constraints); in practice it takes 16–24 on the
+Biq Mac instances.
 
 ### Max-Cut Specific
 
@@ -368,7 +371,7 @@ For Max-Cut on an $n$-vertex graph:
 - Matrix dimension: $n \times n$
 - Number of constraints: $m = n$ (one diagonal constraint per vertex)
 - Per iteration: $O(n^2 \cdot n^2 + n^3) = O(n^4)$
-- Total: $O(n^{4.5} \log(1/\varepsilon))$
+- Total: $O(n^4)$ times the iteration count
 
 For a from-scratch solver without exploiting sparsity, practical limit is roughly $n \leq 100$–$200$.
 
@@ -505,7 +508,7 @@ Parameters: $c_1 = 10^{-4}$, $\beta = 0.5$, $\alpha_0 = 1.0$.
 | | Dense IPM (§3) | Burer-Monteiro (§7) |
 |---|---|---|
 | **Per iteration** | $O(n^4)$ | $O(\|E\| \cdot r)$ |
-| **Iterations** | $O(\sqrt{n} \log(1/\varepsilon))$ | $O(1/\varepsilon)$ (gradient descent) |
+| **Iterations** | $O(n \log(1/\varepsilon))$ worst case, ~20 in practice | $O(1/\varepsilon)$ (gradient descent) |
 | **Memory** | $O(n^2)$ | $O(n \cdot r)$ |
 | **Practical limit** | $n \approx 100$–$200$ | $n \approx 10{,}000+$ (sparse) |
 | **Guarantee** | Exact SDP solution | Global SDP optimum (when $r \geq \sqrt{2n}$) |

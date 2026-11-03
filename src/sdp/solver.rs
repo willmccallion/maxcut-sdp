@@ -2,14 +2,15 @@
 //!
 //! Implements the algorithm described in [`MATH.md`](./MATH.md) §3:
 //!
-//! 1. Initialize `X = I`, `S = I`, `y = 0`
+//! 1. Initialize `X = I`, `S = C + αI`, `y = 0`
 //! 2. At each iteration:
 //!    - Compute the Nesterov-Todd scaling matrix `W`
 //!    - Form and solve the Schur complement system for `Δy`
 //!    - Recover search directions `ΔX`, `ΔS`
 //!    - Line search to maintain positive definiteness
 //!    - Update barrier parameter `μ`
-//! 3. Terminate when duality gap < ε
+//! 3. Terminate when the relative duality gap and the relative primal and
+//!    dual infeasibilities are all < ε, or fail after `max_iterations`
 //!
 //! The per-iteration cost is `O(m² n² + m³)` where `n` is the matrix dimension
 //! and `m` is the number of constraints. See [`MATH.md`](./MATH.md) §5.
@@ -17,6 +18,9 @@
 use super::linalg::DenseMatrix;
 use super::{SdpProblem, SdpSolution};
 use crate::GwError;
+
+/// Centering parameter `σ`: each step targets `μ_next = σ μ`. See [`MATH.md`](./MATH.md) §3.6.
+const CENTERING: f64 = 0.2;
 
 /// Configuration for the interior point solver.
 #[derive(Debug, Clone)]
@@ -54,17 +58,17 @@ impl Solver {
     /// Solves the given SDP and returns the optimal solution.
     ///
     /// This is the main entry point. It runs the primal-dual interior point
-    /// method with Nesterov-Todd scaling until the duality gap drops below
-    /// `config.epsilon` or `config.max_iterations` is reached.
+    /// method with Nesterov-Todd scaling until the relative duality gap and
+    /// the relative primal and dual infeasibilities all drop below
+    /// `config.epsilon`.
     ///
     /// See [`MATH.md`](./MATH.md) §3.8 for the complete algorithm.
     ///
     /// # Errors
     ///
     /// Returns [`GwError::SolverFailed`] on a numerical failure (e.g., Cholesky
-    /// failure during iteration). Reaching `config.max_iterations` is not an
-    /// error: the last iterate is returned, and its `duality_gap` says how close
-    /// it got.
+    /// failure during iteration) or when `config.max_iterations` pass without
+    /// converging.
     pub fn solve(&self, problem: &SdpProblem) -> Result<SdpSolution, GwError> {
         let n = problem.n;
         let m = problem.constraints.len();
@@ -72,18 +76,15 @@ impl Solver {
 
         let mut iterations = 0;
 
-        for iter in 0..self.config.max_iterations {
-            iterations = iter + 1;
-
-            // Compute duality gap.
-            let gap = Self::duality_gap(&x, &s);
-            if gap < self.config.epsilon {
-                break;
+        while !Self::has_converged(problem, &x, &y, &s, self.config.epsilon)? {
+            if iterations == self.config.max_iterations {
+                return Err(GwError::SolverFailed(format!(
+                    "interior point method did not converge in {iterations} iterations"
+                )));
             }
+            iterations += 1;
 
-            let mu = Self::complementarity(&x, &s, n);
-            let sigma = Self::centering_parameter(n);
-            let mu_target = sigma * mu;
+            let mu_target = CENTERING * Self::complementarity(&x, &s, n)?;
 
             // Compute NT scaling W.
             let w = Self::compute_nt_scaling(&x, &s)?;
@@ -116,7 +117,7 @@ impl Solver {
             .zip(&y)
             .map(|(c, &yi)| c.b * yi)
             .sum();
-        let duality_gap = Self::duality_gap(&x, &s);
+        let duality_gap = Self::complementarity(&x, &s, n)?;
 
         Ok(SdpSolution {
             x,
@@ -273,15 +274,7 @@ impl Solver {
             .sub(x)
             .map_err(|e| GwError::SolverFailed(format!("Schur centering: {e}")))?;
 
-        // Dual residual: R_d = C - Σ y_j A_j - S
-        let mut rd = problem.c.clone();
-        for (j, cj) in problem.constraints.iter().enumerate() {
-            let scaled = cj.a.scale(-y[j]);
-            rd.add_assign(&scaled)
-                .map_err(|e| GwError::SolverFailed(format!("Schur Rd accum: {e}")))?;
-        }
-        rd.sub_assign(s)
-            .map_err(|e| GwError::SolverFailed(format!("Schur Rd sub S: {e}")))?;
+        let rd = Self::dual_residual(problem, y, s)?;
 
         // Compute W R_d W.
         let w_rd = w
@@ -348,19 +341,7 @@ impl Solver {
             .map_err(|e| GwError::SolverFailed(format!("Schur solve: {e}")))?;
 
         // ΔS = R_d − Σ Δy_i A_i
-        // R_d = C − Σ y_i A_i − S (dual residual)
-        let mut dual_slack = problem.c.clone();
-        for (i, ci) in problem.constraints.iter().enumerate() {
-            let scaled = ci.a.scale(-y[i]);
-            dual_slack
-                .add_assign(&scaled)
-                .map_err(|e| GwError::SolverFailed(format!("ds dual_slack: {e}")))?;
-        }
-        let rd = dual_slack
-            .sub(s)
-            .map_err(|e| GwError::SolverFailed(format!("ds Rd: {e}")))?;
-
-        let mut ds = rd;
+        let mut ds = Self::dual_residual(problem, y, s)?;
         for (i, ci) in problem.constraints.iter().enumerate() {
             let scaled = ci.a.scale(dy[i]);
             ds.sub_assign(&scaled)
@@ -413,27 +394,77 @@ impl Solver {
         Ok(alpha.clamp(0.0, 1.0))
     }
 
-    /// Computes the normalized duality gap `⟨X, S⟩ / n`.
-    ///
-    /// See [`MATH.md`](./MATH.md) §3.7.
-    fn duality_gap(x: &DenseMatrix, s: &DenseMatrix) -> f64 {
-        // Use trace of X*S, but cheaper: sum of element-wise products.
-        let n = x.rows();
-        let xs = x.inner_product(s).unwrap_or(f64::INFINITY);
-        xs / n as f64
-    }
-
-    /// Computes `⟨X, S⟩ / n` — the raw complementarity measure.
-    fn complementarity(x: &DenseMatrix, s: &DenseMatrix, n: usize) -> f64 {
-        let xs = x.inner_product(s).unwrap_or(f64::INFINITY);
-        xs / n as f64
-    }
-
-    /// Computes the centering parameter `σ = 1 - 0.3 / √n`.
+    /// Computes the complementarity measure `μ = ⟨X, S⟩ / n`.
     ///
     /// See [`MATH.md`](./MATH.md) §3.6.
-    fn centering_parameter(n: usize) -> f64 {
-        1.0 - 0.3 / (n as f64).sqrt()
+    fn complementarity(x: &DenseMatrix, s: &DenseMatrix, n: usize) -> Result<f64, GwError> {
+        let xs = x
+            .inner_product(s)
+            .map_err(|e| GwError::SolverFailed(format!("complementarity: {e}")))?;
+        Ok(xs / n as f64)
+    }
+
+    /// Whether the relative duality gap and the relative primal and dual
+    /// infeasibilities are all below `epsilon`.
+    ///
+    /// See [`MATH.md`](./MATH.md) §3.7.
+    fn has_converged(
+        problem: &SdpProblem,
+        x: &DenseMatrix,
+        y: &[f64],
+        s: &DenseMatrix,
+        epsilon: f64,
+    ) -> Result<bool, GwError> {
+        let solver_failed = |what: &str, e: GwError| GwError::SolverFailed(format!("{what}: {e}"));
+        let primal_obj = problem
+            .c
+            .inner_product(x)
+            .map_err(|e| solver_failed("convergence primal obj", e))?;
+        let xs = x
+            .inner_product(s)
+            .map_err(|e| solver_failed("convergence gap", e))?;
+        let gap = xs / (1.0 + primal_obj.abs());
+
+        let mut primal_residual_sq = 0.0_f64;
+        let mut b_sq = 0.0_f64;
+        for ci in &problem.constraints {
+            let ax =
+                ci.a.inner_product(x)
+                    .map_err(|e| solver_failed("convergence A(X)", e))?;
+            primal_residual_sq = (ci.b - ax).mul_add(ci.b - ax, primal_residual_sq);
+            b_sq = ci.b.mul_add(ci.b, b_sq);
+        }
+        let primal_infeasibility = primal_residual_sq.sqrt() / (1.0 + b_sq.sqrt());
+
+        let rd = Self::dual_residual(problem, y, s)?;
+        let rd_norm = rd
+            .inner_product(&rd)
+            .map_err(|e| solver_failed("convergence |Rd|", e))?
+            .sqrt();
+        let c_norm = problem
+            .c
+            .inner_product(&problem.c)
+            .map_err(|e| solver_failed("convergence |C|", e))?
+            .sqrt();
+        let dual_infeasibility = rd_norm / (1.0 + c_norm);
+
+        Ok(gap < epsilon && primal_infeasibility < epsilon && dual_infeasibility < epsilon)
+    }
+
+    /// Computes the dual residual `R_d = C − Σ yᵢ Aᵢ − S`.
+    fn dual_residual(
+        problem: &SdpProblem,
+        y: &[f64],
+        s: &DenseMatrix,
+    ) -> Result<DenseMatrix, GwError> {
+        let mut rd = problem.c.clone();
+        for (ci, &yi) in problem.constraints.iter().zip(y) {
+            rd.add_assign(&ci.a.scale(-yi))
+                .map_err(|e| GwError::SolverFailed(format!("Rd accum: {e}")))?;
+        }
+        rd.sub_assign(s)
+            .map_err(|e| GwError::SolverFailed(format!("Rd sub S: {e}")))?;
+        Ok(rd)
     }
 }
 
