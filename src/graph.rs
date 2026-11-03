@@ -7,8 +7,8 @@
 //!
 //! See [`maxcut/MATH.md`](../maxcut/MATH.md) §3 for the Laplacian definition.
 
-use crate::sdp::linalg::DenseMatrix;
 use crate::GwError;
+use crate::sdp::linalg::DenseMatrix;
 
 /// A weighted undirected graph.
 ///

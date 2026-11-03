@@ -7,12 +7,12 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
+use maxcut_sdp::GwError;
 use maxcut_sdp::maxcut::exact::exact_maxcut;
 use maxcut_sdp::maxcut::{GwBmConfig, GwConfig, gw_maxcut, gw_maxcut_bm};
 use maxcut_sdp::parser::{parse_auto, parse_biqmac, parse_dimacs};
 use maxcut_sdp::sdp::solver::SolverConfig;
 use maxcut_sdp::sdp::solver_bm::BmSolverConfig;
-use maxcut_sdp::GwError;
 
 /// Goemans-Williamson Max-Cut approximation via semidefinite programming.
 #[derive(Parser, Debug)]
@@ -91,9 +91,8 @@ fn main() {
 }
 
 fn run(cli: &Cli) -> Result<(), GwError> {
-    let input = std::fs::read_to_string(&cli.input).map_err(|e| {
-        GwError::ParseError(format!("failed to read {}: {e}", cli.input.display()))
-    })?;
+    let input = std::fs::read_to_string(&cli.input)
+        .map_err(|e| GwError::ParseError(format!("failed to read {}: {e}", cli.input.display())))?;
 
     let graph = match cli.format {
         Some(InputFormat::Biqmac) => parse_biqmac(&input)?,

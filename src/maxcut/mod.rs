@@ -17,11 +17,11 @@ pub mod rounding;
 
 use std::time::{Duration, Instant};
 
+use crate::GwError;
 use crate::graph::Graph;
+use crate::sdp::SdpProblem;
 use crate::sdp::solver::{Solver, SolverConfig};
 use crate::sdp::solver_bm::{BmSolver, BmSolverConfig};
-use crate::sdp::SdpProblem;
-use crate::GwError;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
@@ -122,7 +122,14 @@ pub fn gw_maxcut(graph: &Graph, config: &GwConfig) -> Result<MaxCutResult, GwErr
         .seed
         .map_or_else(StdRng::from_os_rng, StdRng::seed_from_u64);
 
-    rounding::multi_round(&solution.x, graph, config.num_trials, config.ils_rounds, sdp_bound, &mut rng)
+    rounding::multi_round(
+        &solution.x,
+        graph,
+        config.num_trials,
+        config.ils_rounds,
+        sdp_bound,
+        &mut rng,
+    )
 }
 
 /// Runs the GW Max-Cut algorithm using the Burer-Monteiro low-rank solver.
@@ -203,9 +210,8 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
     // population of diverse partitions and refine them in parallel.
     if let Some(limit) = config.time_limit {
         // Build pool from the best partitions across all restarts.
-        candidate_pool.sort_unstable_by(|a, b| {
-            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        candidate_pool
+            .sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         candidate_pool.truncate(pool_size);
 
         // Give each pool member its own RNG for parallel execution.
@@ -224,12 +230,7 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
         while start.elapsed() < limit {
             // Run ILS on all pool members in parallel.
             pool.par_iter_mut().for_each(|(partition, cut, slot_rng)| {
-                let new_cut = rounding::iterated_local_search(
-                    partition,
-                    graph,
-                    batch,
-                    slot_rng,
-                );
+                let new_cut = rounding::iterated_local_search(partition, graph, batch, slot_rng);
                 *cut = new_cut;
             });
             rounds_done += batch * pool.len();
@@ -249,9 +250,7 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
             // Periodic progress report.
             let now = start.elapsed();
             if now.saturating_sub(last_report) >= report_interval {
-                eprintln!(
-                    "  Refine: best={best_cut:.0}, {rounds_done} rounds ({now:.1?})",
-                );
+                eprintln!("  Refine: best={best_cut:.0}, {rounds_done} rounds ({now:.1?})",);
                 last_report = now;
             }
         }
@@ -265,7 +264,9 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
     }
 
     if best_partition.is_empty() {
-        return Err(GwError::SolverFailed("BM solver produced no solution".into()));
+        return Err(GwError::SolverFailed(
+            "BM solver produced no solution".into(),
+        ));
     }
 
     let ratio = if best_sdp_bound > 1e-15 {

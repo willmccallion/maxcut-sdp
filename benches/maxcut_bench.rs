@@ -1,5 +1,8 @@
 //! Criterion benchmarks for the maxcut-sdp pipeline.
-#![allow(missing_docs, reason = "criterion_group! generates an undocumented pub fn")]
+#![allow(
+    missing_docs,
+    reason = "criterion_group! generates an undocumented pub fn"
+)]
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use maxcut_sdp::bench::{generate_complete_graph, generate_cycle};

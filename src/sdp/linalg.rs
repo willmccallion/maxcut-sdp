@@ -768,10 +768,7 @@ impl DenseMatrix {
     /// # Errors
     ///
     /// Returns an error if eigendecomposition fails.
-    pub fn apply_eigen_fn(
-        &self,
-        f: impl Fn(f64) -> Result<f64, GwError>,
-    ) -> Result<Self, GwError> {
+    pub fn apply_eigen_fn(&self, f: impl Fn(f64) -> Result<f64, GwError>) -> Result<Self, GwError> {
         let (eigenvalues, q) = self.eigendecomposition_symmetric()?;
         let n = q.rows;
 
@@ -871,7 +868,10 @@ mod tests {
     fn mat_approx_eq(a: &DenseMatrix, b: &DenseMatrix, tol: f64) -> bool {
         a.rows == b.rows
             && a.cols == b.cols
-            && a.data.iter().zip(&b.data).all(|(&x, &y)| approx_eq(x, y, tol))
+            && a.data
+                .iter()
+                .zip(&b.data)
+                .all(|(&x, &y)| approx_eq(x, y, tol))
     }
 
     #[test]
@@ -924,7 +924,9 @@ mod tests {
         let a = DenseMatrix::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0])
             .unwrap_or_else(|_| panic!("from_vec failed"));
         // ||A||_F^2 = 1 + 4 + 9 + 16 = 30
-        let ip = a.inner_product(&a).unwrap_or_else(|_| panic!("inner_product failed"));
+        let ip = a
+            .inner_product(&a)
+            .unwrap_or_else(|_| panic!("inner_product failed"));
         assert!(approx_eq(ip, 30.0, 1e-12));
     }
 
@@ -935,7 +937,9 @@ mod tests {
             .unwrap_or_else(|_| panic!("from_vec failed"));
         let l = a.cholesky().unwrap_or_else(|_| panic!("cholesky failed"));
         // Verify L * L^T = A
-        let llt = l.mul_transpose(&l).unwrap_or_else(|_| panic!("mul_transpose failed"));
+        let llt = l
+            .mul_transpose(&l)
+            .unwrap_or_else(|_| panic!("mul_transpose failed"));
         assert!(mat_approx_eq(&a, &llt, 1e-12));
     }
 
@@ -963,7 +967,9 @@ mod tests {
         // A = [[2,1],[1,2]], eigenvalues = 1, 3
         let a = DenseMatrix::from_vec(2, 2, vec![2.0, 1.0, 1.0, 2.0])
             .unwrap_or_else(|_| panic!("from_vec failed"));
-        let eigs = a.eigenvalues_symmetric().unwrap_or_else(|_| panic!("eig failed"));
+        let eigs = a
+            .eigenvalues_symmetric()
+            .unwrap_or_else(|_| panic!("eig failed"));
         assert!(approx_eq(eigs[0], 1.0, 1e-10));
         assert!(approx_eq(eigs[1], 3.0, 1e-10));
     }
@@ -973,14 +979,16 @@ mod tests {
         // A = [[5,2],[2,3]]
         let a = DenseMatrix::from_vec(2, 2, vec![5.0, 2.0, 2.0, 3.0])
             .unwrap_or_else(|_| panic!("from_vec failed"));
-        let (eigs, q) = a.eigendecomposition_symmetric()
+        let (eigs, q) = a
+            .eigendecomposition_symmetric()
             .unwrap_or_else(|_| panic!("eigendecomp failed"));
         // Reconstruct: A = Q diag(λ) Q^T
         let mut diag = DenseMatrix::zeros(2, 2);
         diag.set(0, 0, eigs[0]);
         diag.set(1, 1, eigs[1]);
         let qd = q.mul(&diag).unwrap_or_else(|_| panic!("mul failed"));
-        let reconstructed = qd.mul_transpose(&q)
+        let reconstructed = qd
+            .mul_transpose(&q)
             .unwrap_or_else(|_| panic!("mul_transpose failed"));
         assert!(mat_approx_eq(&a, &reconstructed, 1e-10));
     }
@@ -989,13 +997,11 @@ mod tests {
     fn eigenvalues_3x3_symmetric() {
         // A = [[2, -1, 0], [-1, 2, -1], [0, -1, 2]]
         // Tridiagonal matrix from 1D Laplacian. Eigenvalues: 2-√2, 2, 2+√2
-        let a = DenseMatrix::from_vec(
-            3,
-            3,
-            vec![2.0, -1.0, 0.0, -1.0, 2.0, -1.0, 0.0, -1.0, 2.0],
-        )
-        .unwrap_or_else(|_| panic!("from_vec failed"));
-        let eigs = a.eigenvalues_symmetric().unwrap_or_else(|_| panic!("eig failed"));
+        let a = DenseMatrix::from_vec(3, 3, vec![2.0, -1.0, 0.0, -1.0, 2.0, -1.0, 0.0, -1.0, 2.0])
+            .unwrap_or_else(|_| panic!("from_vec failed"));
+        let eigs = a
+            .eigenvalues_symmetric()
+            .unwrap_or_else(|_| panic!("eig failed"));
         let sqrt2 = std::f64::consts::SQRT_2;
         assert!(approx_eq(eigs[0], 2.0 - sqrt2, 1e-10));
         assert!(approx_eq(eigs[1], 2.0, 1e-10));
@@ -1043,9 +1049,11 @@ mod tests {
             .unwrap_or_else(|_| panic!("from_vec failed"));
         let b = DenseMatrix::from_vec(2, 3, vec![7.0, 10.0, 8.0, 11.0, 9.0, 12.0])
             .unwrap_or_else(|_| panic!("from_vec failed"));
-        let via_transpose = a.mul(&b.transpose())
+        let via_transpose = a
+            .mul(&b.transpose())
             .unwrap_or_else(|_| panic!("mul failed"));
-        let direct = a.mul_transpose(&b)
+        let direct = a
+            .mul_transpose(&b)
             .unwrap_or_else(|_| panic!("mul_transpose failed"));
         assert!(mat_approx_eq(&via_transpose, &direct, 1e-12));
     }
@@ -1054,7 +1062,9 @@ mod tests {
     fn inv_sqrt_roundtrip() {
         let a = DenseMatrix::from_vec(2, 2, vec![4.0, 2.0, 2.0, 3.0])
             .unwrap_or_else(|_| panic!("from_vec failed"));
-        let inv_sq = a.inv_sqrt_spd().unwrap_or_else(|_| panic!("inv_sqrt failed"));
+        let inv_sq = a
+            .inv_sqrt_spd()
+            .unwrap_or_else(|_| panic!("inv_sqrt failed"));
         // inv_sq * A * inv_sq = I
         let tmp = inv_sq.mul(&a).unwrap_or_else(|_| panic!("mul failed"));
         let result = tmp.mul(&inv_sq).unwrap_or_else(|_| panic!("mul failed"));
@@ -1075,7 +1085,9 @@ mod tests {
         }
         let a = DenseMatrix::from_vec(n, n, data).unwrap_or_else(|_| panic!("from_vec failed"));
         let l = a.cholesky().unwrap_or_else(|_| panic!("cholesky failed"));
-        let llt = l.mul_transpose(&l).unwrap_or_else(|_| panic!("mul_transpose failed"));
+        let llt = l
+            .mul_transpose(&l)
+            .unwrap_or_else(|_| panic!("mul_transpose failed"));
         assert!(mat_approx_eq(&a, &llt, 1e-10));
     }
 

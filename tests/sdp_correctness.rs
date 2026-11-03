@@ -4,9 +4,9 @@
 //! analytically known solutions.
 
 use maxcut_sdp::graph::Graph;
+use maxcut_sdp::sdp::SdpProblem;
 use maxcut_sdp::sdp::linalg::DenseMatrix;
 use maxcut_sdp::sdp::solver::{Solver, SolverConfig};
-use maxcut_sdp::sdp::SdpProblem;
 
 /// Cholesky of a known 2×2 SPD matrix.
 #[test]

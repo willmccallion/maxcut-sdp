@@ -8,8 +8,8 @@
 //! from the integer bitmask directly.
 
 use super::MaxCutResult;
-use crate::graph::Graph;
 use crate::GwError;
+use crate::graph::Graph;
 
 /// Computes the exact maximum cut by brute-force enumeration.
 ///

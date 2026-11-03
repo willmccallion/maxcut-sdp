@@ -9,8 +9,8 @@
 //!
 //! Use [`parse_auto`] to auto-detect the format from the input content.
 
-use crate::graph::Graph;
 use crate::GwError;
+use crate::graph::Graph;
 
 /// Parses a graph in Biq Mac Library format.
 ///
@@ -54,10 +54,7 @@ pub fn parse_biqmac(input: &str) -> Result<Graph, GwError> {
         let j: usize = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| {
             GwError::ParseError(format!("bad vertex on edge line {}", line_num + 2))
         })?;
-        let w: f64 = parts
-            .next()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1.0);
+        let w: f64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(1.0);
 
         // Convert 1-based to 0-based.
         if i == 0 || j == 0 || i > n || j > n {

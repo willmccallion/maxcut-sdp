@@ -19,9 +19,9 @@
 //!
 //! See [`MATH.md`](./MATH.md) §7 for the full derivation.
 
-use crate::graph::Graph;
-use crate::sdp::linalg::{dot, DenseMatrix};
 use crate::GwError;
+use crate::graph::Graph;
+use crate::sdp::linalg::{DenseMatrix, dot};
 use rand::Rng;
 use rayon::prelude::*;
 
@@ -98,11 +98,7 @@ impl BmSolver {
     /// # Errors
     ///
     /// Returns an error if the graph is empty.
-    pub fn solve_maxcut(
-        &self,
-        graph: &Graph,
-        rng: &mut impl Rng,
-    ) -> Result<BmSolution, GwError> {
+    pub fn solve_maxcut(&self, graph: &Graph, rng: &mut impl Rng) -> Result<BmSolution, GwError> {
         self.solve_maxcut_with_context(graph, rng, None)
     }
 
@@ -122,9 +118,10 @@ impl BmSolver {
             return Err(GwError::InvalidGraph("empty graph".into()));
         }
 
-        let r = self.config.rank.unwrap_or_else(|| {
-            ((2.0 * n as f64).sqrt()).ceil() as usize
-        });
+        let r = self
+            .config
+            .rank
+            .unwrap_or_else(|| ((2.0 * n as f64).sqrt()).ceil() as usize);
         let r = r.max(2).min(n);
 
         // Phase 3: Pre-compute edge column offsets, sorted for cache locality.
@@ -159,9 +156,7 @@ impl BmSolver {
 
             for iter in 0..self.config.max_iterations {
                 // Phase 5: Fused gradient + tangent projection + norm.
-                let grad_norm = compute_riemannian_gradient(
-                    &edges, &v, &mut riem_grad,
-                );
+                let grad_norm = compute_riemannian_gradient(&edges, &v, &mut riem_grad);
                 final_grad_norm = grad_norm;
                 iters = iter + 1;
 
@@ -192,10 +187,7 @@ impl BmSolver {
                             -f_current
                         );
                     } else {
-                        eprintln!(
-                            "  iter {iter}: obj={:.4}, grad={grad_norm:.2e}",
-                            -f_current
-                        );
+                        eprintln!("  iter {iter}: obj={:.4}, grad={grad_norm:.2e}", -f_current);
                     }
                 }
 
@@ -205,13 +197,7 @@ impl BmSolver {
                 let beta = if iter == 0 {
                     0.0
                 } else {
-                    compute_pr_beta(
-                        &riem_grad,
-                        &riem_grad_prev,
-                        prev_grad_norm_sq,
-                        n,
-                        iter,
-                    )
+                    compute_pr_beta(&riem_grad, &riem_grad_prev, prev_grad_norm_sq, n, iter)
                 };
 
                 if beta == 0.0 {
@@ -249,8 +235,7 @@ impl BmSolver {
 
                 // Armijo backtracking along search_dir.
                 let dir_deriv_for_armijo = dot(riem_grad.data(), search_dir.data());
-                alpha = (alpha / self.config.backtracking_beta)
-                    .min(self.config.initial_step_size);
+                alpha = (alpha / self.config.backtracking_beta).min(self.config.initial_step_size);
                 let sufficient_decrease = self.config.armijo_c1 * dir_deriv_for_armijo;
 
                 let mut accepted = false;
@@ -276,7 +261,10 @@ impl BmSolver {
                 }
             }
 
-            eprintln!("BM: iters={iters}, obj={:.4}, grad={final_grad_norm:.2e}", -f_current);
+            eprintln!(
+                "BM: iters={iters}, obj={:.4}, grad={final_grad_norm:.2e}",
+                -f_current
+            );
 
             if f_current < best_obj {
                 best_obj = f_current;
@@ -287,7 +275,11 @@ impl BmSolver {
         }
 
         best_v.map_or_else(
-            || Err(GwError::SolverFailed("BM solver produced no solution".into())),
+            || {
+                Err(GwError::SolverFailed(
+                    "BM solver produced no solution".into(),
+                ))
+            },
             |vectors| {
                 Ok(BmSolution {
                     vectors,
@@ -431,12 +423,7 @@ fn compute_pr_beta(
 /// Takes a step along `dir` and retracts onto the product of spheres.
 ///
 /// For each vertex i: `v_trial[i] = normalize(v[i] + α · dir[i])`.
-fn step_and_retract(
-    v: &DenseMatrix,
-    dir: &DenseMatrix,
-    alpha: f64,
-    v_trial: &mut DenseMatrix,
-) {
+fn step_and_retract(v: &DenseMatrix, dir: &DenseMatrix, alpha: f64, v_trial: &mut DenseMatrix) {
     let r = v.rows();
     let vdata = v.data();
     let ddata = dir.data();
@@ -603,7 +590,9 @@ mod tests {
         let l = g.laplacian();
         let vt = v.transpose(); // n×r
         let lv = l.mul(&vt).unwrap_or_else(|_| panic!("mul failed")); // n×r
-        let trace_val = vt.inner_product(&lv).unwrap_or_else(|_| panic!("inner_product failed"));
+        let trace_val = vt
+            .inner_product(&lv)
+            .unwrap_or_else(|_| panic!("inner_product failed"));
         let obj_dense = -0.25 * trace_val;
 
         assert!(
@@ -700,13 +689,7 @@ mod tests {
 
         // SDP bound for K3 = −objective ≈ 2.25 (from GW relaxation).
         let sdp_bound = -sol.objective;
-        assert!(
-            sdp_bound > 2.2,
-            "sdp_bound = {sdp_bound}, expected > 2.2"
-        );
-        assert!(
-            sdp_bound < 2.3,
-            "sdp_bound = {sdp_bound}, expected < 2.3"
-        );
+        assert!(sdp_bound > 2.2, "sdp_bound = {sdp_bound}, expected > 2.2");
+        assert!(sdp_bound < 2.3, "sdp_bound = {sdp_bound}, expected < 2.3");
     }
 }

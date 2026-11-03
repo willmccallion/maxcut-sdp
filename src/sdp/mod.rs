@@ -18,8 +18,8 @@ pub mod linalg;
 pub mod solver;
 pub mod solver_bm;
 
-use crate::graph::Graph;
 use crate::GwError;
+use crate::graph::Graph;
 use linalg::DenseMatrix;
 
 /// A single affine constraint `tr(A_i X) = b_i` in the SDP.

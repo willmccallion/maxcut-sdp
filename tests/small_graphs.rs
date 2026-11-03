@@ -5,7 +5,7 @@
 
 use maxcut_sdp::graph::Graph;
 use maxcut_sdp::maxcut::exact::exact_maxcut;
-use maxcut_sdp::maxcut::{gw_maxcut, GwConfig};
+use maxcut_sdp::maxcut::{GwConfig, gw_maxcut};
 
 /// Triangle (`K_3`) with unit weights: OPT = 2 (cut any single vertex off).
 #[test]

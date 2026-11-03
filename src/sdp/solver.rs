@@ -89,8 +89,7 @@ impl Solver {
             let w = Self::compute_nt_scaling(&x, &s)?;
 
             // Compute search direction.
-            let (dx, dy, ds) =
-                Self::compute_search_direction(problem, &x, &y, &s, mu_target, &w)?;
+            let (dx, dy, ds) = Self::compute_search_direction(problem, &x, &y, &s, mu_target, &w)?;
 
             // Line search for step size.
             let alpha = Self::compute_step_size(&x, &dx, &s, &ds, self.config.step_safety)?;
@@ -243,12 +242,12 @@ impl Solver {
         // Precompute W A_i W for each constraint.
         let mut waw: Vec<DenseMatrix> = Vec::with_capacity(m);
         for ci in &problem.constraints {
-            let wa = w.mul(&ci.a).map_err(|e| {
-                GwError::SolverFailed(format!("Schur W*A: {e}"))
-            })?;
-            let waw_i = wa.mul(w).map_err(|e| {
-                GwError::SolverFailed(format!("Schur W*A*W: {e}"))
-            })?;
+            let wa = w
+                .mul(&ci.a)
+                .map_err(|e| GwError::SolverFailed(format!("Schur W*A: {e}")))?;
+            let waw_i = wa
+                .mul(w)
+                .map_err(|e| GwError::SolverFailed(format!("Schur W*A*W: {e}")))?;
             waw.push(waw_i);
         }
 
@@ -269,42 +268,41 @@ impl Solver {
         let s_inv = s
             .inverse_regularized(1e-14)
             .map_err(|e| GwError::SolverFailed(format!("Schur S^-1: {e}")))?;
-        let centering = s_inv.scale(mu).sub(x).map_err(|e| {
-            GwError::SolverFailed(format!("Schur centering: {e}"))
-        })?;
+        let centering = s_inv
+            .scale(mu)
+            .sub(x)
+            .map_err(|e| GwError::SolverFailed(format!("Schur centering: {e}")))?;
 
         // Dual residual: R_d = C - Σ y_j A_j - S
         let mut rd = problem.c.clone();
         for (j, cj) in problem.constraints.iter().enumerate() {
             let scaled = cj.a.scale(-y[j]);
-            rd.add_assign(&scaled).map_err(|e| {
-                GwError::SolverFailed(format!("Schur Rd accum: {e}"))
-            })?;
+            rd.add_assign(&scaled)
+                .map_err(|e| GwError::SolverFailed(format!("Schur Rd accum: {e}")))?;
         }
-        rd.sub_assign(s).map_err(|e| {
-            GwError::SolverFailed(format!("Schur Rd sub S: {e}"))
-        })?;
+        rd.sub_assign(s)
+            .map_err(|e| GwError::SolverFailed(format!("Schur Rd sub S: {e}")))?;
 
         // Compute W R_d W.
-        let w_rd = w.mul(&rd).map_err(|e| {
-            GwError::SolverFailed(format!("Schur W*Rd: {e}"))
-        })?;
-        let w_rd_w = w_rd.mul(w).map_err(|e| {
-            GwError::SolverFailed(format!("Schur W*Rd*W: {e}"))
-        })?;
+        let w_rd = w
+            .mul(&rd)
+            .map_err(|e| GwError::SolverFailed(format!("Schur W*Rd: {e}")))?;
+        let w_rd_w = w_rd
+            .mul(w)
+            .map_err(|e| GwError::SolverFailed(format!("Schur W*Rd*W: {e}")))?;
 
         let mut h = vec![0.0; m];
         for (i, ci) in problem.constraints.iter().enumerate() {
             let rp = ci.b
-                - ci.a.inner_product(x).map_err(|e| {
-                    GwError::SolverFailed(format!("Schur rp: {e}"))
-                })?;
-            let center_term = ci.a.inner_product(&centering).map_err(|e| {
-                GwError::SolverFailed(format!("Schur center: {e}"))
-            })?;
-            let rd_term = ci.a.inner_product(&w_rd_w).map_err(|e| {
-                GwError::SolverFailed(format!("Schur rd_term: {e}"))
-            })?;
+                - ci.a
+                    .inner_product(x)
+                    .map_err(|e| GwError::SolverFailed(format!("Schur rp: {e}")))?;
+            let center_term =
+                ci.a.inner_product(&centering)
+                    .map_err(|e| GwError::SolverFailed(format!("Schur center: {e}")))?;
+            let rd_term =
+                ci.a.inner_product(&w_rd_w)
+                    .map_err(|e| GwError::SolverFailed(format!("Schur rd_term: {e}")))?;
             h[i] = rp - center_term + rd_term;
         }
 
@@ -343,53 +341,49 @@ impl Solver {
             schur_reg.set(i, i, schur_reg.get(i, i) + reg);
         }
 
-        let l_schur = schur_reg.cholesky().map_err(|e| {
-            GwError::SolverFailed(format!("Schur Cholesky: {e}"))
-        })?;
-        let dy = DenseMatrix::cholesky_solve(&l_schur, &h).map_err(|e| {
-            GwError::SolverFailed(format!("Schur solve: {e}"))
-        })?;
+        let l_schur = schur_reg
+            .cholesky()
+            .map_err(|e| GwError::SolverFailed(format!("Schur Cholesky: {e}")))?;
+        let dy = DenseMatrix::cholesky_solve(&l_schur, &h)
+            .map_err(|e| GwError::SolverFailed(format!("Schur solve: {e}")))?;
 
         // ΔS = R_d − Σ Δy_i A_i
         // R_d = C − Σ y_i A_i − S (dual residual)
         let mut dual_slack = problem.c.clone();
         for (i, ci) in problem.constraints.iter().enumerate() {
             let scaled = ci.a.scale(-y[i]);
-            dual_slack.add_assign(&scaled).map_err(|e| {
-                GwError::SolverFailed(format!("ds dual_slack: {e}"))
-            })?;
+            dual_slack
+                .add_assign(&scaled)
+                .map_err(|e| GwError::SolverFailed(format!("ds dual_slack: {e}")))?;
         }
-        let rd = dual_slack.sub(s).map_err(|e| {
-            GwError::SolverFailed(format!("ds Rd: {e}"))
-        })?;
+        let rd = dual_slack
+            .sub(s)
+            .map_err(|e| GwError::SolverFailed(format!("ds Rd: {e}")))?;
 
         let mut ds = rd;
         for (i, ci) in problem.constraints.iter().enumerate() {
             let scaled = ci.a.scale(dy[i]);
-            ds.sub_assign(&scaled).map_err(|e| {
-                GwError::SolverFailed(format!("ds update: {e}"))
-            })?;
+            ds.sub_assign(&scaled)
+                .map_err(|e| GwError::SolverFailed(format!("ds update: {e}")))?;
         }
 
         // ΔX = σμ S⁻¹ − X − W ΔS W  (note the MINUS sign on W ΔS W)
-        let s_inv = s.inverse_regularized(1e-14).map_err(|e| {
-            GwError::SolverFailed(format!("dx S^-1: {e}"))
-        })?;
+        let s_inv = s
+            .inverse_regularized(1e-14)
+            .map_err(|e| GwError::SolverFailed(format!("dx S^-1: {e}")))?;
 
         let mut dx = s_inv.scale(mu);
-        dx.sub_assign(x).map_err(|e| {
-            GwError::SolverFailed(format!("dx sub X: {e}"))
-        })?;
+        dx.sub_assign(x)
+            .map_err(|e| GwError::SolverFailed(format!("dx sub X: {e}")))?;
 
-        let w_ds = w.mul(&ds).map_err(|e| {
-            GwError::SolverFailed(format!("dx W*dS: {e}"))
-        })?;
-        let w_ds_w = w_ds.mul(w).map_err(|e| {
-            GwError::SolverFailed(format!("dx W*dS*W: {e}"))
-        })?;
-        dx.sub_assign(&w_ds_w).map_err(|e| {
-            GwError::SolverFailed(format!("dx sub WdSW: {e}"))
-        })?;
+        let w_ds = w
+            .mul(&ds)
+            .map_err(|e| GwError::SolverFailed(format!("dx W*dS: {e}")))?;
+        let w_ds_w = w_ds
+            .mul(w)
+            .map_err(|e| GwError::SolverFailed(format!("dx W*dS*W: {e}")))?;
+        dx.sub_assign(&w_ds_w)
+            .map_err(|e| GwError::SolverFailed(format!("dx sub WdSW: {e}")))?;
 
         // Symmetrize ΔX to correct floating-point asymmetry.
         symmetrize(&mut dx);
@@ -425,17 +419,13 @@ impl Solver {
     fn duality_gap(x: &DenseMatrix, s: &DenseMatrix) -> f64 {
         // Use trace of X*S, but cheaper: sum of element-wise products.
         let n = x.rows();
-        let xs = x
-            .inner_product(s)
-            .unwrap_or(f64::INFINITY);
+        let xs = x.inner_product(s).unwrap_or(f64::INFINITY);
         xs / n as f64
     }
 
     /// Computes `⟨X, S⟩ / n` — the raw complementarity measure.
     fn complementarity(x: &DenseMatrix, s: &DenseMatrix, n: usize) -> f64 {
-        let xs = x
-            .inner_product(s)
-            .unwrap_or(f64::INFINITY);
+        let xs = x.inner_product(s).unwrap_or(f64::INFINITY);
         xs / n as f64
     }
 
@@ -473,9 +463,9 @@ fn max_feasible_step(a: &DenseMatrix, da: &DenseMatrix) -> Result<f64, GwError> 
         .map_err(|e| GwError::SolverFailed(format!("step mul2: {e}")))?;
     symmetrize(&mut scaled);
 
-    let min_eig = scaled.min_eigenvalue().map_err(|e| {
-        GwError::SolverFailed(format!("step eigenvalue: {e}"))
-    })?;
+    let min_eig = scaled
+        .min_eigenvalue()
+        .map_err(|e| GwError::SolverFailed(format!("step eigenvalue: {e}")))?;
 
     if min_eig >= 0.0 {
         Ok(1e10) // DA is PSD relative to A, step is essentially unbounded.

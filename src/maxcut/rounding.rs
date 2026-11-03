@@ -14,9 +14,9 @@
 //! See [`MATH.md`](../MATH.md) §4–§5 for the rounding analysis.
 
 use super::MaxCutResult;
+use crate::GwError;
 use crate::graph::Graph;
 use crate::sdp::linalg::DenseMatrix;
-use crate::GwError;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
@@ -281,5 +281,7 @@ pub fn multi_round(
     rng: &mut impl Rng,
 ) -> Result<MaxCutResult, GwError> {
     let vectors = extract_vectors(x)?;
-    Ok(multi_round_from_vectors(&vectors, graph, trials, ils_rounds, sdp_bound, rng))
+    Ok(multi_round_from_vectors(
+        &vectors, graph, trials, ils_rounds, sdp_bound, rng,
+    ))
 }
