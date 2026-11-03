@@ -108,7 +108,7 @@ impl Default for GwBmConfig {
 /// 3. Rounds the solution `k` times using random hyperplanes
 /// 4. Returns the best partition found
 ///
-/// See [`MATH.md`](./MATH.md) §9 for the implementation checklist.
+/// See [`MATH.md`](./MATH.md) §10 for the implementation checklist.
 ///
 /// # Errors
 ///
