@@ -1,6 +1,7 @@
 //! Integration tests for the Burer-Monteiro Max-Cut solver.
 
 use maxcut_sdp::graph::Graph;
+use maxcut_sdp::maxcut::rounding::Rounding;
 use maxcut_sdp::maxcut::{GwBmConfig, GwConfig, gw_maxcut, gw_maxcut_bm};
 use maxcut_sdp::sdp::solver_bm::BmSolverConfig;
 
@@ -34,6 +35,7 @@ fn bm_five_cycle_gw_guarantee() {
     let config = GwBmConfig {
         num_trials: 100,
         ils_rounds: 5,
+        rounding: Rounding::Hyperplane,
         solver_config: BmSolverConfig {
             rank: Some(4),
             ..BmSolverConfig::default()
@@ -63,6 +65,7 @@ fn bm_k4_gw_guarantee() {
     let config = GwBmConfig {
         num_trials: 100,
         ils_rounds: 5,
+        rounding: Rounding::Hyperplane,
         solver_config: BmSolverConfig {
             rank: Some(3),
             ..BmSolverConfig::default()
@@ -99,6 +102,7 @@ fn bm_bound_close_to_ipm() {
     let bm_config = GwBmConfig {
         num_trials: 10,
         ils_rounds: 5,
+        rounding: Rounding::Hyperplane,
         solver_config: BmSolverConfig {
             rank: Some(4),
             ..BmSolverConfig::default()
@@ -125,6 +129,7 @@ fn bm_rank_override() {
     let config = GwBmConfig {
         num_trials: 50,
         ils_rounds: 5,
+        rounding: Rounding::Hyperplane,
         solver_config: BmSolverConfig {
             rank: Some(4), // full rank = n
             ..BmSolverConfig::default()

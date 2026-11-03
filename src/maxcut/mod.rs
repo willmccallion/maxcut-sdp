@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use crate::GwError;
 use crate::graph::Graph;
+use crate::maxcut::rounding::{Rounding, TrialPlan};
 use crate::sdp::SdpProblem;
 use crate::sdp::solver::{Solver, SolverConfig};
 use crate::sdp::solver_bm::{BmSolver, BmSolverConfig};
@@ -48,6 +49,8 @@ pub struct GwConfig {
     pub num_trials: usize,
     /// Number of iterated local search rounds per rounding trial.
     pub ils_rounds: usize,
+    /// How each trial rounds the SDP vectors.
+    pub rounding: Rounding,
     /// Configuration for the underlying SDP solver.
     pub solver_config: SolverConfig,
     /// Optional RNG seed for reproducibility.
@@ -59,6 +62,7 @@ impl Default for GwConfig {
         Self {
             num_trials: 100,
             ils_rounds: 50,
+            rounding: Rounding::default(),
             solver_config: SolverConfig::default(),
             seed: None,
         }
@@ -72,6 +76,8 @@ pub struct GwBmConfig {
     pub num_trials: usize,
     /// Number of iterated local search rounds per rounding trial.
     pub ils_rounds: usize,
+    /// How each trial rounds the SDP vectors.
+    pub rounding: Rounding,
     /// Configuration for the BM solver.
     pub solver_config: BmSolverConfig,
     /// Optional RNG seed for reproducibility (used for both solver and rounding).
@@ -86,6 +92,7 @@ impl Default for GwBmConfig {
         Self {
             num_trials: 100,
             ils_rounds: 50,
+            rounding: Rounding::default(),
             solver_config: BmSolverConfig::default(),
             seed: None,
             time_limit: None,
@@ -122,14 +129,12 @@ pub fn gw_maxcut(graph: &Graph, config: &GwConfig) -> Result<MaxCutResult, GwErr
         .seed
         .map_or_else(StdRng::from_os_rng, StdRng::seed_from_u64);
 
-    rounding::multi_round(
-        &solution.x,
-        graph,
-        config.num_trials,
-        config.ils_rounds,
-        sdp_bound,
-        &mut rng,
-    )
+    let plan = TrialPlan {
+        trials: config.num_trials,
+        ils_rounds: config.ils_rounds,
+        rounding: config.rounding,
+    };
+    rounding::multi_round(&solution.x, graph, plan, sdp_bound, &mut rng)
 }
 
 /// Runs the GW Max-Cut algorithm using the Burer-Monteiro low-rank solver.
@@ -181,11 +186,15 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
             best_sdp_bound = sdp_bound;
         }
 
+        let plan = TrialPlan {
+            trials: config.num_trials,
+            ils_rounds: config.ils_rounds,
+            rounding: config.rounding,
+        };
         let (result, top_partitions) = rounding::multi_round_with_pool(
             &solution.vectors,
             graph,
-            config.num_trials,
-            config.ils_rounds,
+            plan,
             sdp_bound,
             pool_size,
             &mut rng,

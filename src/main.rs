@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use clap::Parser;
 use maxcut_sdp::GwError;
 use maxcut_sdp::maxcut::exact::exact_maxcut;
+use maxcut_sdp::maxcut::rounding::{RotationAngle, Rounding};
 use maxcut_sdp::maxcut::{GwBmConfig, GwConfig, gw_maxcut, gw_maxcut_bm};
 use maxcut_sdp::parser::{parse_auto, parse_biqmac, parse_dimacs};
 use maxcut_sdp::sdp::solver::SolverConfig;
@@ -61,6 +62,16 @@ struct Cli {
     /// restart+round cycles as fit within this duration.
     #[arg(long)]
     time: Option<u64>,
+
+    /// Round with Zwick's outward rotation by this angle, in radians within
+    /// [0, π/2], instead of plain hyperplane rounding.
+    #[arg(long, value_parser = parse_rotation)]
+    rotation: Option<RotationAngle>,
+}
+
+fn parse_rotation(arg: &str) -> Result<RotationAngle, String> {
+    let radians: f64 = arg.parse().map_err(|e| format!("{e}"))?;
+    RotationAngle::new(radians).ok_or_else(|| format!("{radians} is not within [0, π/2]"))
 }
 
 /// Supported input file formats.
@@ -108,12 +119,16 @@ fn run(cli: &Cli) -> Result<(), GwError> {
     );
 
     // Run GW algorithm with selected solver.
+    let rounding = cli
+        .rotation
+        .map_or(Rounding::Hyperplane, Rounding::OutwardRotation);
     let start = Instant::now();
     let result = match cli.solver {
         SolverChoice::Ipm => {
             let config = GwConfig {
                 num_trials: cli.trials,
                 ils_rounds: cli.ils_rounds,
+                rounding,
                 solver_config: SolverConfig {
                     epsilon: cli.epsilon,
                     ..SolverConfig::default()
@@ -126,6 +141,7 @@ fn run(cli: &Cli) -> Result<(), GwError> {
             let config = GwBmConfig {
                 num_trials: cli.trials,
                 ils_rounds: cli.ils_rounds,
+                rounding,
                 solver_config: BmSolverConfig {
                     rank: cli.rank,
                     num_restarts: cli.restarts,

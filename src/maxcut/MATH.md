@@ -155,6 +155,41 @@ $$
 \mathbb{E}[\text{cut}] = \sum_{(i,j) \in E} w_{ij} \cdot \frac{\arccos(X^{*}_{ij})}{\pi}
 $$
 
+### Outward Rotations (Zwick 1999)
+
+Outward rotation changes the vectors before the hyperplane cuts them. For an angle
+$\theta \in [0, \pi/2]$, each $\mathbf{v}_i$ is rotated towards its own new direction
+$\mathbf{e}_i$, orthogonal to every $\mathbf{v}_j$ and to every other $\mathbf{e}_j$:
+
+$$
+\mathbf{v}_i' = \cos\theta \, \mathbf{v}_i + \sin\theta \, \mathbf{e}_i
+$$
+
+The $\mathbf{v}_i'$ are still unit vectors, and for $i \neq j$,
+$\langle \mathbf{v}_i', \mathbf{v}_j' \rangle = \cos^2\theta \, X^{*}_{ij}$. By the separation
+probability above, a random hyperplane separates $i$ and $j$ with probability
+
+$$
+\frac{\arccos(\cos^2\theta \, X^{*}_{ij})}{\pi}
+$$
+
+A hyperplane normal in the enlarged space is a pair $(\mathbf{r}, \mathbf{g})$ of independent
+Gaussians, $\mathbf{r} \in \mathbb{R}^n$ and $\mathbf{g} \in \mathbb{R}^n$ with one coordinate per
+vertex, so vertex $i$ goes to $S$ when
+
+$$
+\cos\theta \, \langle \mathbf{v}_i, \mathbf{r} \rangle + \sin\theta \, g_i \geq 0
+$$
+
+No vectors need to be built. $\theta = 0$ is hyperplane rounding, and $\theta = \pi/2$ ignores the
+SDP and gives a uniformly random cut; angles in between interpolate. Zwick shows that when the
+SDP value is a smaller fraction of the total weight, a suitable $\theta > 0$ has a better
+approximation guarantee than hyperplane rounding, while for instances whose SDP value is a large
+fraction of the total weight, $\theta = 0$ remains the right choice.
+
+The rounding is `outward_rotation_round()` in `rounding.rs`, chosen with `Rounding::OutwardRotation`
+(`--rotation <RADIANS>` on the command line). Hyperplane rounding is the default.
+
 ---
 
 ## 5. The Approximation Guarantee
@@ -446,6 +481,6 @@ is not too loose on this instance.
 | 2. Formulate SDP: $C = -\frac{1}{4}L$, constraints $X_{ii} = 1$ | `sdp/mod.rs` | `SdpProblem::maxcut_relaxation()` |
 | 3. Solve SDP via IPM | `sdp/solver.rs` | `Solver::solve()` |
 | 4. Extract vectors via Cholesky: $X^{*} = V^\top V$ | `maxcut/rounding.rs` | `extract_vectors()` |
-| 5. Random hyperplane rounding ($k$ trials) | `maxcut/rounding.rs` | `multi_round()` |
+| 5. Hyperplane or outward rotation rounding ($k$ trials) | `maxcut/rounding.rs` | `multi_round()` |
 | 6. One-flip local search (per trial) | `maxcut/rounding.rs` | `one_flip_local_search()` |
 | 7. Return best partition and approximation ratio | `maxcut/mod.rs` | `gw_maxcut()` |

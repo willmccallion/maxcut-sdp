@@ -11,6 +11,8 @@
 //! `arccos(⟨v_i, v_j⟩) / π`, which guarantees an expected cut value of
 //! at least `α_GW · SDP_OPT`.
 //!
+//! Trials can instead round with Zwick's outward rotations; see [`Rounding`].
+//!
 //! See [`MATH.md`](../MATH.md) §4–§5 for the rounding analysis.
 
 use super::MaxCutResult;
@@ -20,6 +22,55 @@ use crate::sdp::linalg::DenseMatrix;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
+use std::f64::consts::{FRAC_PI_2, TAU};
+
+/// An outward rotation angle `θ` in radians, within `[0, π/2]`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RotationAngle(f64);
+
+impl RotationAngle {
+    /// Returns `None` unless `radians` is a finite angle in `[0, π/2]`.
+    pub fn new(radians: f64) -> Option<Self> {
+        (0.0..=FRAC_PI_2)
+            .contains(&radians)
+            .then_some(Self(radians))
+    }
+
+    /// The angle in radians.
+    pub const fn radians(self) -> f64 {
+        self.0
+    }
+}
+
+/// How a rounding trial turns the SDP vectors into a partition.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum Rounding {
+    /// Goemans-Williamson random hyperplane rounding.
+    #[default]
+    Hyperplane,
+    /// Zwick's outward rotation by the given angle, then a random hyperplane.
+    OutwardRotation(RotationAngle),
+}
+
+impl Rounding {
+    fn partition(self, vectors: &DenseMatrix, rng: &mut impl Rng) -> Vec<bool> {
+        match self {
+            Self::Hyperplane => random_hyperplane_round(vectors, rng),
+            Self::OutwardRotation(angle) => outward_rotation_round(vectors, angle, rng),
+        }
+    }
+}
+
+/// What every rounding trial does.
+#[derive(Debug, Clone, Copy)]
+pub struct TrialPlan {
+    /// Number of independent rounding trials.
+    pub trials: usize,
+    /// Iterated local search rounds applied to each trial's partition.
+    pub ils_rounds: usize,
+    /// How each trial rounds the SDP vectors.
+    pub rounding: Rounding,
+}
 
 /// Extracts unit vectors from a PSD matrix via Cholesky factorization.
 ///
@@ -59,31 +110,64 @@ pub fn extract_vectors(x: &DenseMatrix) -> Result<DenseMatrix, GwError> {
 ///
 /// See [`MATH.md`](../MATH.md) §4.
 pub fn random_hyperplane_round(vectors: &DenseMatrix, rng: &mut impl Rng) -> Vec<bool> {
-    let n = vectors.cols(); // number of vertices
-    let dim = vectors.rows(); // dimension of each vector
+    let r = gaussian_vector(vectors.rows(), rng);
+    projections(vectors, &r)
+        .into_iter()
+        .map(|dot| dot >= 0.0)
+        .collect()
+}
 
-    // Generate random Gaussian vector r ∈ R^dim via Box-Muller transform.
-    let r: Vec<f64> = (0..dim)
+/// Performs a single outward rotation rounding (Zwick 1999).
+///
+/// Rotates each vector `v_i` by `θ` towards its own new orthogonal direction
+/// `e_i`, giving `v_i' = cos θ · v_i + sin θ · e_i`, and cuts the rotated
+/// vectors with a random hyperplane `(r, g)`: vertex `i` goes to `S` when
+/// `cos θ · ⟨v_i, r⟩ + sin θ · g_i ≥ 0`. For `i ≠ j`, `⟨v_i', v_j'⟩ =
+/// cos² θ · X_ij`, so the pair is separated with probability
+/// `arccos(cos² θ · X_ij) / π`. `θ = 0` is hyperplane rounding and
+/// `θ = π/2` a uniformly random cut.
+///
+/// See [`MATH.md`](../MATH.md) §4.
+pub fn outward_rotation_round(
+    vectors: &DenseMatrix,
+    angle: RotationAngle,
+    rng: &mut impl Rng,
+) -> Vec<bool> {
+    let (sin, cos) = angle.radians().sin_cos();
+    let r = gaussian_vector(vectors.rows(), rng);
+    let g = gaussian_vector(vectors.cols(), rng);
+    projections(vectors, &r)
+        .into_iter()
+        .zip(g)
+        .map(|(dot, g_i)| cos.mul_add(dot, sin * g_i) >= 0.0)
+        .collect()
+}
+
+/// Independent standard normal samples, via the Box-Muller transform.
+fn gaussian_vector(len: usize, rng: &mut impl Rng) -> Vec<f64> {
+    (0..len)
         .map(|_| {
             let u1: f64 = rng.random();
             let u2: f64 = rng.random();
-            (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+            (-2.0 * u1.ln()).sqrt() * (TAU * u2).cos()
         })
-        .collect();
+        .collect()
+}
 
-    // Compute sign(V^T r): for each vertex i, dot product of column i with r.
+/// `⟨v_i, r⟩` for every column `v_i` of `vectors`.
+fn projections(vectors: &DenseMatrix, r: &[f64]) -> Vec<f64> {
+    let dim = vectors.rows();
     let vdata = vectors.data();
-    let mut partition = Vec::with_capacity(n);
-    for i in 0..n {
-        let col_start = i * dim;
-        let col = &vdata[col_start..col_start + dim];
+    let mut dots = Vec::with_capacity(vectors.cols());
+    for i in 0..vectors.cols() {
+        let col = &vdata[i * dim..(i + 1) * dim];
         let mut dot = 0.0_f64;
         for k in 0..dim {
             dot = col[k].mul_add(r[k], dot);
         }
-        partition.push(dot >= 0.0);
+        dots.push(dot);
     }
-    partition
+    dots
 }
 
 /// One-flip local search: greedy post-processing of a partition.
@@ -173,29 +257,29 @@ pub fn iterated_local_search(
 /// The `vectors` matrix has dimension d × n where column i is vertex i's
 /// unit vector (d = n for IPM/Cholesky, d = r for Burer-Monteiro).
 ///
-/// Each trial performs hyperplane rounding, then iterated local search, which
-/// alternates one-flip local search with random perturbations.
+/// Each trial rounds the vectors as `plan.rounding` says, then runs iterated
+/// local search, which alternates one-flip local search with random
+/// perturbations.
 ///
 /// With `k = 100` trials, the probability of missing a near-optimal cut is
 /// negligibly small. See [`MATH.md`](../MATH.md) §7.
 pub fn multi_round_from_vectors(
     vectors: &DenseMatrix,
     graph: &Graph,
-    trials: usize,
-    ils_rounds: usize,
+    plan: TrialPlan,
     sdp_bound: f64,
     rng: &mut impl Rng,
 ) -> MaxCutResult {
     // Generate deterministic per-trial seeds from the base RNG, then
     // run trials in parallel with independent thread-local RNGs.
-    let seeds: Vec<u64> = (0..trials).map(|_| rng.random::<u64>()).collect();
+    let seeds: Vec<u64> = (0..plan.trials).map(|_| rng.random::<u64>()).collect();
 
     let (best_partition, best_cut) = seeds
         .par_iter()
         .map(|&seed| {
             let mut trial_rng = StdRng::seed_from_u64(seed);
-            let mut partition = random_hyperplane_round(vectors, &mut trial_rng);
-            let cut = iterated_local_search(&mut partition, graph, ils_rounds, &mut trial_rng);
+            let mut partition = plan.rounding.partition(vectors, &mut trial_rng);
+            let cut = iterated_local_search(&mut partition, graph, plan.ils_rounds, &mut trial_rng);
             (partition, cut)
         })
         .reduce(
@@ -214,7 +298,7 @@ pub fn multi_round_from_vectors(
         cut_value: best_cut,
         sdp_bound,
         approximation_ratio: ratio,
-        num_trials: trials,
+        num_trials: plan.trials,
     }
 }
 
@@ -223,20 +307,19 @@ pub fn multi_round_from_vectors(
 pub fn multi_round_with_pool(
     vectors: &DenseMatrix,
     graph: &Graph,
-    trials: usize,
-    ils_rounds: usize,
+    plan: TrialPlan,
     sdp_bound: f64,
     pool_size: usize,
     rng: &mut impl Rng,
 ) -> (MaxCutResult, Vec<(Vec<bool>, f64)>) {
-    let seeds: Vec<u64> = (0..trials).map(|_| rng.random::<u64>()).collect();
+    let seeds: Vec<u64> = (0..plan.trials).map(|_| rng.random::<u64>()).collect();
 
     let mut all_results: Vec<(Vec<bool>, f64)> = seeds
         .par_iter()
         .map(|&seed| {
             let mut trial_rng = StdRng::seed_from_u64(seed);
-            let mut partition = random_hyperplane_round(vectors, &mut trial_rng);
-            let cut = iterated_local_search(&mut partition, graph, ils_rounds, &mut trial_rng);
+            let mut partition = plan.rounding.partition(vectors, &mut trial_rng);
+            let cut = iterated_local_search(&mut partition, graph, plan.ils_rounds, &mut trial_rng);
             (partition, cut)
         })
         .collect();
@@ -258,7 +341,7 @@ pub fn multi_round_with_pool(
         cut_value: best_cut,
         sdp_bound,
         approximation_ratio: ratio,
-        num_trials: trials,
+        num_trials: plan.trials,
     };
 
     (result, all_results)
@@ -275,13 +358,90 @@ pub fn multi_round_with_pool(
 pub fn multi_round(
     x: &DenseMatrix,
     graph: &Graph,
-    trials: usize,
-    ils_rounds: usize,
+    plan: TrialPlan,
     sdp_bound: f64,
     rng: &mut impl Rng,
 ) -> Result<MaxCutResult, GwError> {
     let vectors = extract_vectors(x)?;
     Ok(multi_round_from_vectors(
-        &vectors, graph, trials, ils_rounds, sdp_bound, rng,
+        &vectors, graph, plan, sdp_bound, rng,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn random_vectors(dim: usize, n: usize, seed: u64) -> DenseMatrix {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let data = (0..dim * n).map(|_| rng.random::<f64>() - 0.5).collect();
+        let Ok(vectors) = DenseMatrix::from_vec(dim, n, data) else {
+            panic!("dim * n values fill a dim x n matrix");
+        };
+        vectors
+    }
+
+    fn angle(radians: f64) -> RotationAngle {
+        let Some(angle) = RotationAngle::new(radians) else {
+            panic!("{radians} is a valid rotation angle");
+        };
+        angle
+    }
+
+    #[test]
+    fn rotation_angle_accepts_only_zero_to_half_pi() {
+        let accepted = [0.0, 0.5, FRAC_PI_2].map(|r| RotationAngle::new(r).is_some());
+        let rejected = [-0.01, FRAC_PI_2 + 0.01, f64::NAN, f64::INFINITY]
+            .map(|r| RotationAngle::new(r).is_none());
+
+        assert_eq!(accepted, [true; 3]);
+        assert_eq!(rejected, [true; 4]);
+    }
+
+    #[test]
+    fn zero_rotation_is_hyperplane_rounding() {
+        let vectors = random_vectors(5, 200, 1);
+
+        let hyperplane = random_hyperplane_round(&vectors, &mut StdRng::seed_from_u64(7));
+        let rotated = outward_rotation_round(&vectors, angle(0.0), &mut StdRng::seed_from_u64(7));
+
+        assert_eq!(hyperplane, rotated);
+    }
+
+    #[test]
+    fn right_angle_rotation_ignores_the_vectors() {
+        let first = random_vectors(5, 200, 1);
+        let second = random_vectors(5, 200, 2);
+
+        let from_first =
+            outward_rotation_round(&first, angle(FRAC_PI_2), &mut StdRng::seed_from_u64(7));
+        let from_second =
+            outward_rotation_round(&second, angle(FRAC_PI_2), &mut StdRng::seed_from_u64(7));
+
+        assert_eq!(from_first, from_second);
+    }
+
+    #[test]
+    fn identical_vectors_separate_with_probability_arccos_cos_squared_over_pi() {
+        let Ok(vectors) = DenseMatrix::from_vec(2, 2, vec![1.0, 0.0, 1.0, 0.0]) else {
+            panic!("four values fill a 2 x 2 matrix");
+        };
+        let theta = std::f64::consts::FRAC_PI_4;
+        let expected = theta.cos().powi(2).acos() / std::f64::consts::PI;
+        let mut rng = StdRng::seed_from_u64(3);
+        let samples = 20_000;
+
+        let separated = (0..samples)
+            .filter(|_| {
+                let partition = outward_rotation_round(&vectors, angle(theta), &mut rng);
+                partition[0] != partition[1]
+            })
+            .count();
+
+        let frequency = separated as f64 / f64::from(samples);
+        assert!(
+            (frequency - expected).abs() < 0.015,
+            "separated {frequency}, expected {expected}"
+        );
+    }
 }
