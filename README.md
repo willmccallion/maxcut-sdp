@@ -11,7 +11,7 @@ This project implements the entire pipeline from scratch — no CVXPY, no MOSEK,
 - **Dense linear algebra**: Cholesky factorization, eigendecomposition, matrix square roots
 - **Primal-dual interior point method**: Nesterov-Todd scaling, Schur complement system, log-det barrier
 - **Burer-Monteiro low-rank solver**: nonlinear CG on the factored form $X = RR^T$, scalable to 14,000+ nodes
-- **GW rounding pipeline**: random hyperplane rounding, outward rotations (Zwick 1999), iterated local search with variable perturbation, parallel population-based refinement
+- **GW rounding pipeline**: random hyperplane rounding, one-flip local search, iterated local search with variable perturbation, parallel population-based refinement
 
 ## The Math
 
@@ -19,7 +19,7 @@ The GW algorithm relaxes the NP-hard Max-Cut integer program into a semidefinite
 
 Full mathematical derivations are in the `MATH.md` files:
 - [`src/sdp/MATH.md`](src/sdp/MATH.md) — SDP standard form, duality theory, and the primal-dual interior point method with Nesterov-Todd scaling
-- [`src/maxcut/MATH.md`](src/maxcut/MATH.md) — GW algorithm, the rounding proof, outward rotations, and the approximation guarantee
+- [`src/maxcut/MATH.md`](src/maxcut/MATH.md) — GW algorithm, the rounding proof, local search, and the approximation guarantee
 
 ## Gset Benchmarks
 
@@ -65,7 +65,7 @@ graph TD
     E --> F
 
     F --> G["Hyperplane Rounding<br/>k trials, parallel"]
-    G --> H["Outward Rotations<br/>Zwick 1999"]
+    G --> H["One-Flip Local Search"]
     H --> I["Iterated Local Search<br/>variable perturbation"]
     I --> J["Population Refinement<br/>--time budget"]
 
@@ -125,7 +125,7 @@ src/
 │   └── MATH.md          Mathematical reference
 └── maxcut/
     ├── mod.rs           GW algorithm orchestration + refinement loop
-    ├── rounding.rs      Hyperplane rounding, outward rotations, ILS
+    ├── rounding.rs      Hyperplane rounding, one-flip local search, ILS
     ├── exact.rs         Brute-force exact solver (small graphs)
     └── MATH.md          Mathematical reference
 ```

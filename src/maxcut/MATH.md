@@ -316,12 +316,10 @@ The rounding step is computationally cheap ($O(n)$ per trial) compared to the SD
 
 ---
 
-## 8. Outward Rotations (Local Search)
+## 8. One-Flip Local Search
 
 After hyperplane rounding produces a partition, a simple **greedy local search** can improve the
-cut value. This technique, analyzed by Zwick (1999), is sometimes called "outward rotations"
-because each vertex flip moves a vector away from its current side and toward the opposite side
-of the hyperplane.
+cut value: move single vertices to the other side while doing so increases the cut.
 
 ### Algorithm
 
@@ -353,7 +351,7 @@ in at most $W / w_{\min}$ steps. For unit-weight graphs, this is at most $|E|$ f
 twice — once from each endpoint). In practice, convergence happens in a small number of sweeps
 (typically 2–5 for sparse Gset instances).
 
-**Improvement:** On standard benchmark instances (Gset), outward rotations typically improve
+**Improvement:** On standard benchmark instances (Gset), one-flip local search typically improves
 the cut value by 1–3% over raw hyperplane rounding. This closes the gap between the theoretical
 $\alpha_{\text{GW}} \approx 0.878$ guarantee and the best-known cut values. The improvement is
 largest when the hyperplane rounding produces a partition that is "almost good" but has a few
@@ -449,5 +447,5 @@ is not too loose on this instance.
 | 3. Solve SDP via IPM | `sdp/solver.rs` | `Solver::solve()` |
 | 4. Extract vectors via Cholesky: $X^{*} = V^\top V$ | `maxcut/rounding.rs` | `extract_vectors()` |
 | 5. Random hyperplane rounding ($k$ trials) | `maxcut/rounding.rs` | `multi_round()` |
-| 6. Outward rotations (local search per trial) | `maxcut/rounding.rs` | `outward_rotations()` |
+| 6. One-flip local search (per trial) | `maxcut/rounding.rs` | `one_flip_local_search()` |
 | 7. Return best partition and approximation ratio | `maxcut/mod.rs` | `gw_maxcut()` |

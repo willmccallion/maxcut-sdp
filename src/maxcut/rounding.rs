@@ -86,12 +86,12 @@ pub fn random_hyperplane_round(vectors: &DenseMatrix, rng: &mut impl Rng) -> Vec
     partition
 }
 
-/// Outward rotations (Zwick 1999): greedy local search post-processing.
+/// One-flip local search: greedy post-processing of a partition.
 ///
 /// For each vertex, if flipping it to the other side of the partition increases
 /// the cut value, flip it. Repeat until no single flip improves the cut.
 /// This typically improves cut values by 1-3% over raw hyperplane rounding.
-pub fn outward_rotations(partition: &mut [bool], graph: &Graph) -> f64 {
+pub fn one_flip_local_search(partition: &mut [bool], graph: &Graph) -> f64 {
     let n = graph.num_vertices();
     let mut improved = true;
     while improved {
@@ -120,7 +120,7 @@ pub fn outward_rotations(partition: &mut [bool], graph: &Graph) -> f64 {
 /// Iterated local search: escapes 1-flip local optima via random perturbation.
 ///
 /// Starting from a partition (not necessarily a local optimum), performs
-/// `rounds` iterations of: run outward rotations to a local optimum,
+/// `rounds` iterations of: run one-flip local search to a local optimum,
 /// perturb by flipping random vertices, repeat. Uses variable perturbation
 /// strength — small perturbations (n/100) most of the time for refinement,
 /// with periodic large perturbations (n/10) to escape deep basins.
@@ -135,7 +135,7 @@ pub fn iterated_local_search(
     let k_medium = 1_usize.max(n / 10);
     let k_large = 1_usize.max(n / 3);
 
-    let mut best_cut = outward_rotations(partition, graph);
+    let mut best_cut = one_flip_local_search(partition, graph);
     let mut best_partition = partition.to_vec();
 
     for round in 0..rounds {
@@ -155,7 +155,7 @@ pub fn iterated_local_search(
             candidate[v] = !candidate[v];
         }
 
-        let cut = outward_rotations(&mut candidate, graph);
+        let cut = one_flip_local_search(&mut candidate, graph);
 
         if cut > best_cut {
             best_cut = cut;
@@ -173,8 +173,8 @@ pub fn iterated_local_search(
 /// The `vectors` matrix has dimension d × n where column i is vertex i's
 /// unit vector (d = n for IPM/Cholesky, d = r for Burer-Monteiro).
 ///
-/// Each trial performs hyperplane rounding, outward rotations (Zwick 1999),
-/// and iterated local search to escape 1-flip local optima.
+/// Each trial performs hyperplane rounding, then iterated local search, which
+/// alternates one-flip local search with random perturbations.
 ///
 /// With `k = 100` trials, the probability of missing a near-optimal cut is
 /// negligibly small. See [`MATH.md`](../MATH.md) §7.
