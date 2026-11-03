@@ -250,7 +250,7 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
             // Periodic progress report.
             let now = start.elapsed();
             if now.saturating_sub(last_report) >= report_interval {
-                eprintln!("  Refine: best={best_cut:.0}, {rounds_done} rounds ({now:.1?})",);
+                eprintln!("  Refine: best={best_cut:.0}, {rounds_done} rounds ({now:.1?})");
                 last_report = now;
             }
         }

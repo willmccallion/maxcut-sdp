@@ -102,8 +102,8 @@ fn five_cycle_gw() {
     let result = result.unwrap_or_else(|_| panic!("gw_maxcut failed"));
 
     // GW guarantee: cut >= α_GW * OPT
-    let alpha_gw = 0.878;
-    assert!(result.cut_value >= alpha_gw * 4.0 - 0.01);
+    let alpha_gw: f64 = 0.878;
+    assert!(result.cut_value >= alpha_gw.mul_add(4.0, -0.01));
 }
 
 /// Verify that `Graph::cut_value` agrees with the partition from exact solver.

@@ -47,12 +47,12 @@ fn bm_five_cycle_gw_guarantee() {
     let result = result.unwrap_or_else(|_| panic!("gw_maxcut_bm failed"));
 
     // GW guarantee: cut >= α_GW · OPT ≈ 0.878 · 4 ≈ 3.51.
-    let alpha_gw = 0.878;
+    let alpha_gw: f64 = 0.878;
     assert!(
-        result.cut_value >= alpha_gw * 4.0 - 0.01,
+        result.cut_value >= alpha_gw.mul_add(4.0, -0.01),
         "cut = {}, expected >= {}",
         result.cut_value,
-        alpha_gw * 4.0 - 0.01
+        alpha_gw.mul_add(4.0, -0.01)
     );
 }
 
@@ -75,12 +75,12 @@ fn bm_k4_gw_guarantee() {
     assert!(result.is_ok());
     let result = result.unwrap_or_else(|_| panic!("gw_maxcut_bm failed"));
 
-    let alpha_gw = 0.878;
+    let alpha_gw: f64 = 0.878;
     assert!(
-        result.cut_value >= alpha_gw * 4.0 - 0.01,
+        result.cut_value >= alpha_gw.mul_add(4.0, -0.01),
         "cut = {}, expected >= {}",
         result.cut_value,
-        alpha_gw * 4.0 - 0.01
+        alpha_gw.mul_add(4.0, -0.01)
     );
 }
 

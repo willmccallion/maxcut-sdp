@@ -563,7 +563,7 @@ mod tests {
             let ei = &edata[start..start + r];
             let d = dot(vi, ei);
             for k in 0..r {
-                rdata[start + k] = ei[k] - d * vi[k];
+                rdata[start + k] = d.mul_add(-vi[k], ei[k]);
             }
         }
 

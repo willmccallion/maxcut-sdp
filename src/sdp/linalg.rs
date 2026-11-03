@@ -646,20 +646,20 @@ impl DenseMatrix {
                         let tau = diff / (2.0 * a_ij);
                         // Smaller root of t^2 + 2τt - 1 = 0 (avoids cancellation).
                         if tau >= 0.0 {
-                            1.0 / (tau + (1.0 + tau * tau).sqrt())
+                            1.0 / (tau + tau.mul_add(tau, 1.0).sqrt())
                         } else {
-                            -1.0 / (-tau + (1.0 + tau * tau).sqrt())
+                            -1.0 / (-tau + tau.mul_add(tau, 1.0).sqrt())
                         }
                     };
 
-                    let cos = 1.0 / (1.0 + t * t).sqrt();
+                    let cos = 1.0 / t.mul_add(t, 1.0).sqrt();
                     let sin = t * cos;
                     // Rotation parameter for reduced-multiplication formulas.
                     let tau_rot = sin / (1.0 + cos);
 
                     // Update diagonal elements.
-                    a[idx(i, i, n)] -= t * a_ij;
-                    a[idx(j, j, n)] += t * a_ij;
+                    a[idx(i, i, n)] = t.mul_add(-a_ij, a[idx(i, i, n)]);
+                    a[idx(j, j, n)] = t.mul_add(a_ij, a[idx(j, j, n)]);
                     a[idx(i, j, n)] = 0.0;
                     a[idx(j, i, n)] = 0.0;
 
@@ -670,8 +670,8 @@ impl DenseMatrix {
                         }
                         let a_ki = a[idx(k, i, n)];
                         let a_kj = a[idx(k, j, n)];
-                        let new_ki = a_ki - sin * (a_kj + tau_rot * a_ki);
-                        let new_kj = a_kj + sin * (a_ki - tau_rot * a_kj);
+                        let new_ki = sin.mul_add(-tau_rot.mul_add(a_ki, a_kj), a_ki);
+                        let new_kj = sin.mul_add(tau_rot.mul_add(-a_kj, a_ki), a_kj);
                         a[idx(k, i, n)] = new_ki;
                         a[idx(i, k, n)] = new_ki;
                         a[idx(k, j, n)] = new_kj;
@@ -683,8 +683,8 @@ impl DenseMatrix {
                     for k in 0..n {
                         let qi_k = qd[idx(k, i, n)];
                         let qj_k = qd[idx(k, j, n)];
-                        qd[idx(k, i, n)] = qi_k - sin * (qj_k + tau_rot * qi_k);
-                        qd[idx(k, j, n)] = qj_k + sin * (qi_k - tau_rot * qj_k);
+                        qd[idx(k, i, n)] = sin.mul_add(-tau_rot.mul_add(qi_k, qj_k), qi_k);
+                        qd[idx(k, j, n)] = sin.mul_add(tau_rot.mul_add(-qj_k, qi_k), qj_k);
                     }
                 }
             }
