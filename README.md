@@ -11,7 +11,7 @@ This project implements the entire pipeline from scratch — no CVXPY, no MOSEK,
 - **Dense linear algebra**: Cholesky factorization, eigendecomposition, matrix square roots
 - **Primal-dual interior point method**: Nesterov-Todd scaling, Schur complement system, log-det barrier
 - **Burer-Monteiro low-rank solver**: nonlinear CG on the factored form $X = RR^T$, scalable to 14,000+ nodes
-- **GW rounding pipeline**: random hyperplane rounding, one-flip local search, iterated local search with variable perturbation, parallel population-based refinement
+- **GW rounding pipeline**: random hyperplane rounding or Zwick's outward rotations, one-flip local search, iterated local search with variable perturbation, parallel population-based refinement
 
 ## The Math
 
@@ -19,7 +19,7 @@ The GW algorithm relaxes the NP-hard Max-Cut integer program into a semidefinite
 
 Full mathematical derivations are in the `MATH.md` files:
 - [`src/sdp/MATH.md`](src/sdp/MATH.md) — SDP standard form, duality theory, and the primal-dual interior point method with Nesterov-Todd scaling
-- [`src/maxcut/MATH.md`](src/maxcut/MATH.md) — GW algorithm, the rounding proof, local search, and the approximation guarantee
+- [`src/maxcut/MATH.md`](src/maxcut/MATH.md) — GW algorithm, the rounding proof, outward rotations, local search, and the approximation guarantee
 
 ## Gset Benchmarks
 
@@ -99,10 +99,13 @@ cargo build --release
 | `--time` | — | Time budget in seconds (restarts + refinement) |
 | `--trials` | 100 | Number of hyperplane rounding trials |
 | `--ils-rounds` | 50 | Iterated local search rounds per trial |
+| `--rotation` | off | Round with Zwick's outward rotation by this angle in radians, within $[0, \pi/2]$ |
 | `--restarts` | 3 | BM random restarts |
 | `--rank` | auto | BM factorization rank (default: $\lceil\sqrt{2n}\rceil$) |
 | `--seed` | random | RNG seed for reproducibility |
 | `--exact` | off | Also compute brute-force optimal (small graphs) |
+
+Outward rotations did not raise the final cut on the Biq Mac instances or on random graphs of up to 5,000 nodes: with the default 50 ILS rounds no angle from 0.1 to 0.5 improved any of them, and larger angles lost up to 0.5% on the biggest graphs. Iterated local search already closes the gap they target, so hyperplane rounding stays the default.
 
 ### Supported Input Formats
 
