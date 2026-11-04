@@ -39,7 +39,7 @@ impl Graph {
     /// # Errors
     ///
     /// Returns [`GwError::InvalidGraph`] if `u` or `v` is out of range,
-    /// or if `u == v` (self-loops are not allowed).
+    /// if `u == v` (self-loops are not allowed), or if `weight` is not finite.
     pub fn add_edge(&mut self, u: usize, v: usize, weight: f64) -> Result<(), GwError> {
         if u >= self.n || v >= self.n {
             return Err(GwError::InvalidGraph(format!(
@@ -50,6 +50,11 @@ impl Graph {
         if u == v {
             return Err(GwError::InvalidGraph(format!(
                 "self-loops not allowed: u=v={u}"
+            )));
+        }
+        if !weight.is_finite() {
+            return Err(GwError::InvalidGraph(format!(
+                "weight of edge ({u}, {v}) is {weight}, not a finite number"
             )));
         }
         let (lo, hi) = if u < v { (u, v) } else { (v, u) };

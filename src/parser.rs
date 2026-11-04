@@ -54,7 +54,8 @@ pub fn parse_biqmac(input: &str) -> Result<Graph, GwError> {
         let j: usize = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| {
             GwError::ParseError(format!("bad vertex on edge line {}", line_num + 2))
         })?;
-        let w: f64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(1.0);
+        let w = parse_weight(parts.next())
+            .map_err(|e| GwError::ParseError(format!("{e} on edge line {}", line_num + 2)))?;
 
         // Convert 1-based to 0-based.
         if i == 0 || j == 0 || i > n || j > n {
@@ -123,7 +124,7 @@ pub fn parse_dimacs(input: &str) -> Result<Graph, GwError> {
                 .next()
                 .and_then(|s| s.parse().ok())
                 .ok_or_else(|| GwError::ParseError("bad edge line".to_string()))?;
-            let w: f64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(1.0);
+            let w = parse_weight(parts.next()).map_err(GwError::ParseError)?;
 
             if i == 0 || j == 0 || i > n || j > n {
                 return Err(GwError::ParseError(format!(
@@ -137,9 +138,23 @@ pub fn parse_dimacs(input: &str) -> Result<Graph, GwError> {
     graph.ok_or_else(|| GwError::ParseError("no problem line found".to_string()))
 }
 
+/// An edge's weight: 1 when the line gives none, otherwise the finite
+/// number it gives.
+fn parse_weight(token: Option<&str>) -> Result<f64, String> {
+    let Some(token) = token else {
+        return Ok(1.0);
+    };
+    token
+        .parse::<f64>()
+        .ok()
+        .filter(|w| w.is_finite())
+        .ok_or_else(|| format!("bad weight `{token}`"))
+}
+
 /// Auto-detects the input format and parses accordingly.
 ///
-/// Heuristic: if any line starts with `p ` or `e `, it's DIMACS; otherwise Biq Mac.
+/// Heuristic: if any line starts with `p ` or `e ` after its indentation,
+/// it's DIMACS; otherwise Biq Mac.
 ///
 /// # Errors
 ///
@@ -147,6 +162,7 @@ pub fn parse_dimacs(input: &str) -> Result<Graph, GwError> {
 pub fn parse_auto(input: &str) -> Result<Graph, GwError> {
     let is_dimacs = input
         .lines()
+        .map(str::trim_start)
         .any(|l| l.starts_with("p ") || l.starts_with("e "));
     if is_dimacs {
         parse_dimacs(input)
