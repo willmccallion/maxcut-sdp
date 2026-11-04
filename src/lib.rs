@@ -6,8 +6,10 @@
 //! This crate implements the full pipeline:
 //! 1. Parse a weighted graph from Biq Mac or DIMACS format
 //! 2. Formulate the Max-Cut SDP relaxation (Laplacian-based)
-//! 3. Solve via primal-dual interior point method with Nesterov-Todd scaling
-//! 4. Round the SDP solution using random hyperplane rounding
+//! 3. Solve via a primal-dual interior point method with Nesterov-Todd
+//!    scaling, or Burer-Monteiro low-rank factorization for large graphs
+//! 4. Round the SDP solution with random hyperplanes or outward rotations,
+//!    then improve each cut by local search
 //! 5. Return the best partition across multiple trials
 //!
 //! All linear algebra is implemented from scratch — no external BLAS, LAPACK,

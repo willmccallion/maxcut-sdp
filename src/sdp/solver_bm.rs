@@ -1,14 +1,16 @@
 //! Burer-Monteiro low-rank Max-Cut solver.
 //!
-//! Replaces the dense O(n⁴) interior point method with nonlinear conjugate gradient
-//! (Polak-Ribière) on a low-rank factorization `X = VVᵀ`. Each column of V (stored
+//! Replaces the dense interior point method, `O(n³)` per iteration, with nonlinear
+//! conjugate gradient (Polak-Ribière+) on a low-rank factorization `X = VVᵀ`. Each column of V (stored
 //! in column-major r×n layout) is constrained to the unit sphere S^{r−1}, making the
 //! feasible set a product of spheres.
 //!
 //! Per-iteration cost is O(|E|·r) by iterating edges directly — the Laplacian is
-//! never formed. With rank r ≈ √(2n), the Barvinok-Pataki bound guarantees that the
-//! relaxation is tight, and the Boumal et al. (2016) result ensures no spurious local
-//! minima.
+//! never formed. The default rank r = ⌈√(2n)⌉ has r(r+1)/2 > n, so the SDP has an
+//! optimum of that rank (Barvinok-Pataki), and for almost every cost matrix every
+//! second-order critical point is optimal (Boumal et al. 2016). The solver stops at an
+//! approximate first-order point, though, so its objective is no upper bound; the
+//! pipeline certifies one ([`MATH.md`](./MATH.md) §7.10).
 //!
 //! Hot-path optimizations:
 //! - Objective uses dot-product identity: ‖vi−vj‖² = 2(1−⟨vi,vj⟩), reusing the
@@ -396,13 +398,10 @@ fn project_to_tangent_inplace(v: &DenseMatrix, h: &mut DenseMatrix) {
         });
 }
 
-/// Computes the Polak-Ribière beta with restart heuristics.
+/// Computes the Polak-Ribière+ beta with periodic restarts.
 ///
-/// `β = max(0, ⟨g_new, g_new − T(g_old)⟩ / ‖g_old‖²)`
-///
-/// Restart heuristics:
-/// - Periodic: every `n` iterations, reset `β = 0`
-/// - Powell: if `|⟨g_new, T(g_old)⟩| > 0.2 · ‖g_new‖²`, reset `β = 0`
+/// `β = max(0, ⟨g_new, g_new − T(g_old)⟩ / ‖g_old‖²)`, and `β = 0` every
+/// `n` iterations; the clamp at 0 restarts as steepest descent otherwise.
 fn compute_pr_beta(
     grad_new: &DenseMatrix,
     grad_old: &DenseMatrix,

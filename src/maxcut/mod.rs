@@ -2,13 +2,15 @@
 //!
 //! Orchestrates the full GW pipeline:
 //! 1. Formulate the Max-Cut SDP relaxation from the graph Laplacian
-//! 2. Solve the SDP via interior point method
-//! 3. Extract vectors from the SDP solution (Cholesky factorization)
-//! 4. Run multiple random hyperplane roundings
+//! 2. Solve the SDP by interior point method or Burer-Monteiro factorization
+//! 3. Take unit vectors from the solution (a Cholesky factor of the IPM's `X`,
+//!    or BM's factor itself)
+//! 4. Run multiple random roundings, each improved by iterated local search
 //! 5. Return the best partition found
 //!
-//! The algorithm achieves an approximation ratio of `α_GW ≈ 0.878`, which is
-//! optimal under the Unique Games Conjecture.
+//! On graphs with non-negative weights, rounding achieves an expected
+//! approximation ratio of `α_GW ≈ 0.878`, which is optimal under the Unique
+//! Games Conjecture.
 //!
 //! See [`MATH.md`](./MATH.md) for the full mathematical derivation.
 
@@ -266,7 +268,7 @@ pub fn gw_maxcut(graph: &Graph, config: &GwConfig) -> Result<MaxCutResult, GwErr
 /// Runs the GW Max-Cut algorithm using the Burer-Monteiro low-rank solver.
 ///
 /// This is the recommended path for large or sparse graphs (n > 100).
-/// Per-iteration cost is O(|E|·r) instead of O(n⁴) for the dense IPM.
+/// Per-iteration cost is O(|E|·r) instead of O(n³) for the dense IPM.
 ///
 /// Each BM restart produces a different SDP solution with different vector
 /// geometry. Rounding is performed from each restart's vectors independently,

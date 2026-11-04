@@ -279,7 +279,8 @@ $\mathcal{A}^{*}(y) = \sum_i y_i A_i$. Typical tolerance: $\varepsilon = 10^{-8}
 Input: SDP data (C, {A_i}, b), tolerance ε, max iterations K
 Output: Approximate optimal (X*, y*, S*)
 
-1. Initialize: X = I, S = I, y = 0 (or use heuristic)
+1. Initialize: X = I, y = 0, S = C, shifted to C + (1 − λ_min(C)) I
+   when C is not positive definite (an infeasible start)
 2. For k = 1, 2, ..., K:
    a. Compute μ = ⟨X, S⟩ / n
    b. If convergence criteria met: return (X, y, S)
@@ -353,7 +354,7 @@ Typically converges in $\sim 10\text{–}15$ iterations to $\varepsilon = 10^{-8
 | Operation | Cost |
 |-----------|------|
 | NT scaling $W$ (eigendecomposition of $n \times n$ matrix) | $O(n^3)$ |
-| Schur complement matrix $M$ ($m^2$ inner products of $n \times n$ matrices) | $O(m^2 n^2)$ |
+| Schur complement matrix $M$ ($m^2$ inner products of $n \times n$ matrices; $M_{ij} = W_{ij}^2$ for diagonal constraints) | $O(m^2 n^2)$; $O(n^2)$ for diagonal constraints |
 | Cholesky factorization of $M$ ($m \times m$) | $O(m^3)$ |
 | Search direction recovery ($\Delta X$, $\Delta S$) | $O(m n^2)$ |
 | Step size (eigenvalues of $n \times n$ matrix) | $O(n^3)$ |
@@ -370,10 +371,14 @@ Biq Mac instances.
 For Max-Cut on an $n$-vertex graph:
 - Matrix dimension: $n \times n$
 - Number of constraints: $m = n$ (one diagonal constraint per vertex)
-- Per iteration: $O(n^2 \cdot n^2 + n^3) = O(n^4)$
-- Total: $O(n^4)$ times the iteration count
+- Per iteration: $O(n^3)$. The diagonal constraints are held as indices, so $M_{ij} = W_{ij}^2$
+  costs $O(n^2)$ in all, and the eigendecompositions and products of $n \times n$ matrices
+  dominate, as does the $O(n^3)$ Cholesky of $M$
+- Memory: $O(n^2)$
+- Total: $O(n^3)$ times the iteration count
 
-For a from-scratch solver without exploiting sparsity, practical limit is roughly $n \leq 100$–$200$.
+Jacobi eigendecompositions make up most of that cost, so the practical limit is roughly
+$n \leq 100$–$200$; `--solver auto` switches to Burer-Monteiro (§7) past 100 vertices.
 
 ---
 
@@ -384,14 +389,13 @@ section of this document where it appears.
 
 | Operation | Used in | Notes |
 |-----------|---------|-------|
-| Cholesky factorization $A = LL^\top$ | §3.3 (NT scaling), §3.4 (Schur solve) | Fails iff $A$ is not positive definite |
+| Cholesky factorization $A = LL^\top$ | §3.4 (Schur solve) | Fails iff $A$ is not positive definite |
 | Forward/back substitution $Lx = b$, $L^\top x = b$ | §3.4 (Schur solve) | $O(n^2)$ per solve |
 | Matrix multiply $AB$ | §3.3 (forming $WAW$), §3.4 | $O(n^3)$ naive, can optimize later |
 | Trace inner product $\langle A, B \rangle = \text{tr}(A^\top B)$ | §3.4 (Schur entries) | $O(n^2)$, just sum element products |
-| Eigendecomposition $A = Q \Lambda Q^\top$ | §3.3 (NT scaling), §3.5 (step size) | Symmetric matrices only; Jacobi or QR |
-| Minimum eigenvalue $\lambda_{\min}(A)$ | §3.5 (step size), bound certificates | Householder tridiagonalization, then Sturm-sequence bisection |
-| Log-determinant $\ln \det(A) = 2 \sum_i \ln L_{ii}$ | §3.1 (barrier) | Via Cholesky diagonal |
-| Matrix inverse $A^{-1}$ | §3.4 (computing $S^{-1}$) | Via Cholesky: solve $L L^\top X = I$ |
+| Eigendecomposition $A = Q \Lambda Q^\top$ | §3.3 (NT scaling), §3.4 ($S^{-1}$), §3.5 (step size) | Symmetric matrices only; cyclic Jacobi |
+| Minimum eigenvalue $\lambda_{\min}(A)$ | §3.5 (step size), §3.8 (initial $S$), §7.10 (certificates) | Householder tridiagonalization, then Sturm-sequence bisection |
+| Matrix inverse $A^{-1}$ | §3.4 (computing $S^{-1}$) | Via eigendecomposition, eigenvalues clamped to at least $10^{-14}$ |
 | Symmetric matrix square root $A^{1/2}$ | §3.3 (NT scaling) | Via eigendecomposition: $Q \Lambda^{1/2} Q^\top$ |
 | Symmetric matrix inverse square root $A^{-1/2}$ | §3.5 (step size) | Via eigendecomposition: $Q \Lambda^{-1/2} Q^\top$ |
 
@@ -496,29 +500,45 @@ $$
 
 This is the simplest retraction on the sphere (normalization), with $O(n \cdot r)$ cost.
 
-### 7.8 Armijo Backtracking on Manifolds
+### 7.8 Nonlinear Conjugate Gradient with Armijo Backtracking
 
-Step size selection uses standard Armijo backtracking adapted for manifolds:
+The search direction is Polak-Ribière+ conjugate gradient, with the previous direction carried
+to the current tangent space by projection $T$:
 
-1. Start with step size $\alpha$ (try growing from previous: $\alpha \leftarrow \min(\alpha/\beta, \alpha_0)$)
-2. Compute trial point $V' = \text{Retr}(V - \alpha \cdot g)$ where $g = \text{grad} f(V)$
-3. Accept if $f(V') \leq f(V) - c_1 \alpha \|g\|_F^2$ (sufficient decrease)
-4. Otherwise shrink: $\alpha \leftarrow \beta \alpha$ and repeat
+$$
+d = -g + \beta\, T(d_{\text{prev}}), \qquad
+\beta = \max\!\left(0,\; \frac{\|g\|_F^2 - \langle g, g_{\text{prev}} \rangle}{\|g_{\text{prev}}\|_F^2}\right)
+$$
 
-Parameters: $c_1 = 10^{-4}$, $\beta = 0.5$, $\alpha_0 = 1.0$.
+where $g = \text{grad} f(V)$. Since $g$ is tangent at $V$, $\langle g, T(g_{\text{prev}}) \rangle = \langle g, g_{\text{prev}} \rangle$.
+The direction restarts as steepest descent, $d = -g$, every $n$ iterations, when $\beta$ clamps to
+0, and when $d$ is not a descent direction ($\langle g, d \rangle \geq 0$).
+
+The step size along $d$ uses Armijo backtracking adapted for manifolds:
+
+1. Start with step size $\alpha$ (try growing from previous: $\alpha \leftarrow \min(\alpha/\beta_{\text{bt}}, \alpha_0)$)
+2. Compute trial point $V' = \text{Retr}(V + \alpha d)$
+3. Accept if $f(V') \leq f(V) + c_1 \alpha \langle g, d \rangle$ (sufficient decrease)
+4. Otherwise shrink: $\alpha \leftarrow \beta_{\text{bt}} \alpha$ and repeat
+
+Parameters: $c_1 = 10^{-4}$, $\beta_{\text{bt}} = 0.5$, $\alpha_0 = 1.0$.
+
+The solver stops when $\|g\|_F < 10^{-8}$, or when the objective's relative improvement over
+a window of $\max(100, n/10)$ iterations stays below $10^{-6}$ for three windows in a row.
+In practice the second test ends the run, with $\|g\|_F$ around $10^{-4}$ to $10^{-5}$.
 
 ### 7.9 Complexity Comparison
 
 | | Dense IPM (§3) | Burer-Monteiro (§7) |
 |---|---|---|
-| **Per iteration** | $O(n^4)$ | $O(\|E\| \cdot r)$ |
-| **Iterations** | $O(n \log(1/\varepsilon))$ worst case, ~20 in practice | $O(1/\varepsilon)$ (gradient descent) |
+| **Per iteration** | $O(n^3)$ | $O(\|E\| \cdot r)$ |
+| **Iterations** | $O(n \log(1/\varepsilon))$ worst case, ~20 in practice | Until the objective stalls (§7.8); hundreds to thousands |
 | **Memory** | $O(n^2)$ | $O(n \cdot r)$ |
 | **Practical limit** | $n \approx 100$–$200$ | $n \approx 10{,}000+$ (sparse) |
 | **Guarantee** | Certified bound (§7.10) | Certified bound (§7.10) up to $n = 3{,}000$; past it, the objective at a near-critical point |
 
 For a sparse graph with $|E| = O(n)$ and $r = O(\sqrt{n})$, the per-iteration cost is
-$O(n^{3/2})$ — a factor of $n^{5/2}$ improvement over the dense IPM.
+$O(n^{3/2})$ — a factor of $n^{3/2}$ improvement over the dense IPM.
 
 ### 7.10 Certifying the Bound
 
