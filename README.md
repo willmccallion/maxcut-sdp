@@ -15,7 +15,7 @@ This project implements the entire pipeline from scratch — no CVXPY, no MOSEK,
 
 ## The Math
 
-The GW algorithm relaxes the NP-hard Max-Cut integer program into a semidefinite program, solves it in polynomial time, then rounds the continuous solution back to a discrete partition. The celebrated result is that this achieves at least $87.8\%$ of the optimal cut value — and under the Unique Games Conjecture, no polynomial-time algorithm can do better.
+The GW algorithm relaxes the NP-hard Max-Cut integer program into a semidefinite program, solves it in polynomial time, then rounds the continuous solution back to a discrete partition. The celebrated result is that, on graphs with non-negative weights, this achieves at least $87.8\%$ of the optimal cut value in expectation — and under the Unique Games Conjecture, no polynomial-time algorithm can do better.
 
 Full mathematical derivations are in the `MATH.md` files:
 - [`src/sdp/MATH.md`](src/sdp/MATH.md) — SDP standard form, duality theory, and the primal-dual interior point method with Nesterov-Todd scaling

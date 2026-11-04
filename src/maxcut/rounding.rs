@@ -213,8 +213,8 @@ pub const PERTURBATION_CYCLE_ROUNDS: usize = 20;
 /// Starting from a partition (not necessarily a local optimum), performs
 /// `rounds` iterations of: run one-flip local search to a local optimum,
 /// perturb by flipping random vertices, repeat. Uses variable perturbation
-/// strength — small perturbations (n/100) most of the time for refinement,
-/// with periodic large perturbations (n/10) to escape deep basins.
+/// strength to escape deeper basins: n/100 vertices most rounds, n/10 every
+/// fifth round, and n/3 once per [`PERTURBATION_CYCLE_ROUNDS`].
 pub fn iterated_local_search(
     partition: &mut [bool],
     graph: &Graph,

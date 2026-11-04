@@ -278,7 +278,8 @@ $$
 
 ### Main Theorem
 
-**Theorem:** The GW algorithm achieves an expected cut value satisfying:
+**Theorem:** On a graph with non-negative edge weights, the GW algorithm achieves an expected
+cut value satisfying:
 
 $$
 \mathbb{E}[\text{cut}] \geq \alpha_{\text{GW}} \cdot \text{SDP}_{\text{OPT}} \geq \alpha_{\text{GW}} \cdot \text{OPT}
@@ -293,7 +294,9 @@ $$
 = \alpha_{\text{GW}} \cdot \text{SDP}_{\text{OPT}}
 $$
 
-The first inequality applies the key inequality to each edge. Since
+The first inequality applies the key inequality to each edge, which preserves its direction
+only because $w_{ij} \geq 0$. With negative weights, as in some Biq Mac instances, the guarantee
+does not hold. Since
 $\text{SDP}_{\text{OPT}} \geq \text{OPT}$ (the SDP is a relaxation of the integer program):
 
 $$
@@ -326,12 +329,22 @@ and taking the best cut improves the probability of finding a good solution.
 
 ### Analysis
 
-Let $c^{*} = \alpha_{\text{GW}} \cdot \text{SDP}_{\text{OPT}}$. By Markov's inequality applied
-to the complementary random variable, each trial independently has at least a constant
-probability $p > 0$ of producing a cut of value $\geq c^{*}$. After $k$ independent trials:
+Let $c^{*} = \alpha_{\text{GW}} \cdot \text{SDP}_{\text{OPT}}$, so $\mathbb{E}[\text{cut}] \geq c^{*}$, and fix
+$\varepsilon \in (0, 1)$. Markov's inequality does not bound $\Pr[\text{cut} \geq c^{*}]$ away from 0, but
+applied to $W - \text{cut} \geq 0$, where $W = \sum_{(i,j) \in E} w_{ij}$, it does bound the chance of
+falling short of $(1 - \varepsilon)\,c^{*}$:
 
 $$
-\Pr[\text{best cut} < c^{*}] \leq (1 - p)^k
+\Pr[\text{cut} < (1-\varepsilon)\,c^{*}] \leq \frac{W - c^{*}}{W - (1-\varepsilon)\,c^{*}}
+$$
+
+So each trial reaches $(1 - \varepsilon)\,c^{*}$ with probability
+$p \geq \varepsilon c^{*} / W \geq \varepsilon\,\alpha_{\text{GW}} / 2$, using
+$\text{SDP}_{\text{OPT}} \geq \text{OPT} \geq W/2$ for non-negative weights. After $k$ independent
+trials:
+
+$$
+\Pr[\text{best cut} < (1-\varepsilon)\,c^{*}] \leq (1 - p)^k
 $$
 
 For the failure probability to be at most $\delta$:
@@ -342,12 +355,11 @@ $$
 
 ### Practical Recommendation
 
-With $k = 100$ trials, the probability of failing to find a cut at least as good as the
-expected value is negligibly small. In practice, multiple trials almost always find a cut
-very close to (or exceeding) $\text{SDP}_{\text{OPT}}$ on small to medium instances.
+The bound above is loose; in practice the best of $k = 100$ trials, each improved by local
+search (§8), lands much closer to $\text{OPT}$ than $(1 - \varepsilon)\,c^{*}$.
 
-The rounding step is computationally cheap ($O(n)$ per trial) compared to the SDP solve
-($O(n^{4.5})$), so running many trials adds negligible overhead.
+A trial costs $O(n d)$ to round vectors of dimension $d$, plus its local search, while the IPM's
+solve costs $O(n^3)$ per iteration (`sdp/MATH.md` §5), so on that path many trials add little.
 
 ---
 
@@ -377,20 +389,17 @@ $$
 
 ### Analysis
 
-**Convergence:** Each flip strictly increases the cut value. Since the cut value is bounded above
-by the total edge weight $W = \sum_{(i,j) \in E} w_{ij}$, and each flip increases it by at
-least $\min_{(i,j) \in E} w_{ij} > 0$ (for positive-weight graphs), the algorithm terminates
-in at most $W / w_{\min}$ steps. For unit-weight graphs, this is at most $|E|$ flips.
+**Convergence:** Each flip strictly increases the cut value, and there are finitely many
+partitions, so the search terminates. A flip's gain is a signed sum of weights, which for real
+weights can be far smaller than any one weight, so no useful bound on the number of flips follows
+in general. With integer weights every gain is at least 1, so there are at most
+$W = \sum_{(i,j) \in E} w_{ij}$ flips; for unit weights, at most $|E|$.
 
 **Cost per sweep:** Each full sweep over all vertices takes $O(|E|)$ time (each edge is examined
-twice — once from each endpoint). In practice, convergence happens in a small number of sweeps
-(typically 2–5 for sparse Gset instances).
+twice — once from each endpoint).
 
-**Improvement:** On standard benchmark instances (Gset), one-flip local search typically improves
-the cut value by 1–3% over raw hyperplane rounding. This closes the gap between the theoretical
-$\alpha_{\text{GW}} \approx 0.878$ guarantee and the best-known cut values. The improvement is
-largest when the hyperplane rounding produces a partition that is "almost good" but has a few
-misplaced vertices.
+**Improvement:** Local search never lowers a cut. It helps most when rounding produces a
+partition that is almost good but has a few misplaced vertices.
 
 **Composability with multiple trials:** Since local search is cheap ($O(|E|)$ per convergence)
 relative to the SDP solve, it is applied independently to each of the $k$ rounding trials. The
@@ -398,16 +407,17 @@ best locally-optimal partition across all trials is returned.
 
 ### Theoretical Guarantee
 
-The local search alone (without the SDP) provides a $\frac{1}{2}$-approximation: start from any
-partition and flip until stable. At a local optimum, every vertex $v$ satisfies
+On graphs with non-negative weights, the local search alone (without the SDP) provides a
+$\frac{1}{2}$-approximation: start from any partition and flip until stable. At a local optimum, every vertex $v$ satisfies
 $w_{\text{cut}}(v) \geq w_{\text{same}}(v)$, so:
 
 $$
 \text{cut} = \frac{1}{2} \sum_{v \in V} w_{\text{cut}}(v) \geq \frac{1}{2} \sum_{v \in V} \frac{w_{\text{cut}}(v) + w_{\text{same}}(v)}{2} = \frac{1}{2} \sum_{v \in V} \frac{\deg_w(v)}{2} = \frac{W}{2} \geq \frac{\text{OPT}}{2}
 $$
 
-Combined with GW rounding, the local search can only improve the cut, so the $\alpha_{\text{GW}}$
-guarantee is preserved: the result is at least $\max(\alpha_{\text{GW}} \cdot \text{SDP}_{\text{OPT}},\; \text{local optimum})$.
+Combined with GW rounding, the local search can only improve each trial's cut, so the
+$\alpha_{\text{GW}}$ guarantee is preserved: each trial's expected cut is still at least
+$\alpha_{\text{GW}} \cdot \text{SDP}_{\text{OPT}}$, and every final cut is also at least $W/2$.
 
 ---
 
@@ -479,8 +489,9 @@ is not too loose on this instance.
 |------|--------|----------|
 | 1. Build graph Laplacian $L$ | `graph.rs` | `Graph::laplacian()` |
 | 2. Formulate SDP: $C = -\frac{1}{4}L$, constraints $X_{ii} = 1$ | `sdp/mod.rs` | `SdpProblem::maxcut_relaxation()` |
-| 3. Solve SDP via IPM | `sdp/solver.rs` | `Solver::solve()` |
-| 4. Extract vectors via Cholesky: $X^{*} = V^\top V$ | `maxcut/rounding.rs` | `extract_vectors()` |
-| 5. Hyperplane or outward rotation rounding ($k$ trials) | `maxcut/rounding.rs` | `multi_round()` |
-| 6. One-flip local search (per trial) | `maxcut/rounding.rs` | `one_flip_local_search()` |
-| 7. Return best partition and approximation ratio | `maxcut/mod.rs` | `gw_maxcut()` |
+| 3. Solve SDP via IPM, or via Burer-Monteiro for large graphs | `sdp/solver.rs`, `sdp/solver_bm.rs` | `Solver::solve()`, `BmSolver::solve_maxcut()` |
+| 4. Certify the upper bound from a dual solution | `maxcut/mod.rs` | `certified_bound()` |
+| 5. Extract vectors via Cholesky: $X^{*} = V^\top V$ (IPM only) | `maxcut/rounding.rs` | `extract_vectors()` |
+| 6. Hyperplane or outward rotation rounding ($k$ trials) | `maxcut/rounding.rs` | `multi_round()`, `multi_round_with_pool()` |
+| 7. Iterated local search (per trial) | `maxcut/rounding.rs` | `iterated_local_search()` |
+| 8. Return best partition and approximation ratio | `maxcut/mod.rs` | `gw_maxcut()`, `gw_maxcut_bm()` |
