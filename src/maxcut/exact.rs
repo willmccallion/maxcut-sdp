@@ -11,6 +11,9 @@ use super::MaxCutResult;
 use crate::GwError;
 use crate::graph::Graph;
 
+/// Most vertices a partition bitmask can hold with the shift `1 << n` in a `u64`.
+const MAX_MASK_VERTICES: usize = 63;
+
 /// Computes the exact maximum cut by brute-force enumeration.
 ///
 /// Iterates over all `2^n` partitions of the vertex set. Returns the partition
@@ -35,9 +38,11 @@ pub fn exact_maxcut(graph: &Graph) -> Result<MaxCutResult, GwError> {
 ///
 /// # Errors
 ///
-/// Returns [`GwError::InvalidGraph`] if `graph.num_vertices() > max_vertices`.
+/// Returns [`GwError::InvalidGraph`] if `graph.num_vertices() > max_vertices`,
+/// or past the 63 vertices a bitmask holds, whatever `max_vertices` is.
 pub fn exact_maxcut_bounded(graph: &Graph, max_vertices: usize) -> Result<MaxCutResult, GwError> {
     let n = graph.num_vertices();
+    let max_vertices = max_vertices.min(MAX_MASK_VERTICES);
     if n > max_vertices {
         return Err(GwError::InvalidGraph(format!(
             "exact solver limited to {max_vertices} vertices, got {n}"
