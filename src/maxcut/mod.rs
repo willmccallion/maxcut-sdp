@@ -22,6 +22,7 @@ use crate::GwError;
 use crate::graph::Graph;
 use crate::maxcut::rounding::{Rounding, TrialPlan};
 use crate::sdp::SdpProblem;
+use crate::sdp::linalg::DenseMatrix;
 use crate::sdp::solver::{Solver, SolverConfig};
 use crate::sdp::solver_bm::{BmSolver, BmSolverConfig};
 use rand::rngs::StdRng;
@@ -52,6 +53,23 @@ const ZERO_BOUND_TOLERANCE: f64 = 1e-6;
 /// `None` when `reference` is zero up to noise, where no ratio is defined.
 pub fn cut_ratio(cut: f64, reference: f64, scale: f64) -> Option<f64> {
     (reference > ZERO_BOUND_TOLERANCE * scale).then(|| cut / reference)
+}
+
+/// An upper bound on the Max-Cut SDP from any dual `y`, feasible or not.
+///
+/// With `S = C − Diag(y)`, every feasible `X` has `tr(C X) = Σ yᵢ + tr(S X)`,
+/// and `tr(S X) ≥ n·λ_min(S)` because `tr X = n`. So the SDP value
+/// `−min tr(C X)` is at most `−Σ yᵢ + n·max(0, −λ_min(S))`, which is the
+/// dual objective when `y` is feasible and corrects it by what `y` lacks
+/// when it is not. Exact up to the floating-point accuracy of `λ_min`.
+fn certified_bound(c: &DenseMatrix, y: &[f64]) -> Result<f64, GwError> {
+    let mut s = c.clone();
+    for (i, &yi) in y.iter().enumerate() {
+        s.set(i, i, s.get(i, i) - yi);
+    }
+    let lambda_min = s.min_eigenvalue()?;
+    let dual_objective: f64 = y.iter().sum();
+    Ok((y.len() as f64).mul_add((-lambda_min).max(0.0), -dual_objective))
 }
 
 /// Whether a step expected to take `expected`, started at `now`, finishes by
@@ -148,9 +166,9 @@ pub fn gw_maxcut(graph: &Graph, config: &GwConfig) -> Result<MaxCutResult, GwErr
     let solver = Solver::new(config.solver_config.clone());
     let solution = solver.solve(&problem)?;
 
-    // The Max-Cut SDP maximizes (1/4) tr(LX) = -tr(CX); the dual objective of
-    // the converged, dual-feasible iterate bounds it from above.
-    let sdp_bound = -solution.dual_obj;
+    // The Max-Cut SDP maximizes (1/4) tr(LX) = -tr(CX). The converged dual
+    // is feasible only to within the tolerance, so its objective is certified.
+    let sdp_bound = certified_bound(&problem.c, &solution.y)?;
 
     // 3. Round with random hyperplanes.
     let mut rng = config
@@ -352,6 +370,51 @@ mod tests {
         let now = Instant::now();
 
         assert!(!fits_before(Some(now + SECOND), now, 2 * SECOND));
+    }
+
+    fn five_cycle() -> Graph {
+        let mut g = Graph::new(5);
+        for (u, v) in [(0, 1), (1, 2), (2, 3), (3, 4), (4, 0)] {
+            g.add_edge(u, v, 1.0).unwrap_or_else(|e| panic!("{e}"));
+        }
+        g
+    }
+
+    #[test]
+    fn the_certificate_of_a_zero_dual_is_the_eigenvalue_bound() {
+        let graph = five_cycle();
+        let cost = graph.laplacian().scale(-0.25);
+        let lambda_max = -cost.min_eigenvalue().unwrap_or_else(|e| panic!("{e}"));
+
+        let bound = certified_bound(&cost, &[0.0; 5]);
+
+        let bound = bound.unwrap_or_else(|e| panic!("{e}"));
+        assert!(
+            (-5.0_f64).mul_add(lambda_max, bound).abs() < 1e-9,
+            "{bound} vs {}",
+            5.0 * lambda_max
+        );
+    }
+
+    #[test]
+    fn the_ipm_bound_is_certified_and_at_least_the_optimum() {
+        let graph = five_cycle();
+        let problem = SdpProblem::maxcut_relaxation(&graph).unwrap_or_else(|e| panic!("{e}"));
+        let solution = Solver::new(SolverConfig::default())
+            .solve(&problem)
+            .unwrap_or_else(|e| panic!("{e}"));
+
+        let bound = certified_bound(&problem.c, &solution.y).unwrap_or_else(|e| panic!("{e}"));
+
+        assert!(
+            bound >= 4.0,
+            "the 5-cycle's maximum cut is 4; bound {bound}"
+        );
+        assert!(
+            (bound + solution.dual_obj).abs() < 1e-6,
+            "{bound} vs dual {}",
+            -solution.dual_obj
+        );
     }
 
     #[test]
