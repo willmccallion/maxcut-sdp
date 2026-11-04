@@ -30,7 +30,7 @@ struct Cli {
     #[arg(long, default_value_t = maxcut_sdp::maxcut::DEFAULT_TRIALS)]
     trials: NonZeroUsize,
 
-    /// SDP solver convergence tolerance.
+    /// IPM convergence tolerance on the duality gap (IPM only).
     #[arg(long, default_value_t = 1e-8)]
     epsilon: f64,
 
@@ -47,7 +47,7 @@ struct Cli {
     format: Option<InputFormat>,
 
     /// SDP solver backend.
-    #[arg(long, value_enum, default_value_t = SolverChoice::Ipm)]
+    #[arg(long, value_enum, default_value_t = SolverChoice::Auto)]
     solver: SolverChoice,
 
     /// BM factorization rank override (default: ⌈√(2n)⌉).
@@ -88,13 +88,47 @@ enum InputFormat {
     Dimacs,
 }
 
-/// SDP solver backend.
+/// Largest graph `--solver auto` solves with the IPM, whose `O(n³)`
+/// iterations take seconds here and grow impractical soon after.
+const AUTO_IPM_MAX_VERTICES: usize = 100;
+
+/// SDP solver backend, as requested.
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 enum SolverChoice {
+    /// The IPM up to 100 vertices, BM past them.
+    Auto,
     /// Primal-dual interior point method (dense, exact).
     Ipm,
     /// Burer-Monteiro low-rank factorization (sparse, scalable).
     Bm,
+}
+
+/// The SDP solver a run uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Backend {
+    Ipm,
+    Bm,
+}
+
+impl SolverChoice {
+    /// The backend this choice runs on a graph of `vertices` vertices.
+    const fn backend(self, vertices: usize) -> Backend {
+        match self {
+            Self::Auto if vertices <= AUTO_IPM_MAX_VERTICES => Backend::Ipm,
+            Self::Auto | Self::Bm => Backend::Bm,
+            Self::Ipm => Backend::Ipm,
+        }
+    }
+}
+
+impl Backend {
+    /// The name `--solver` takes for this backend.
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Ipm => "ipm",
+            Self::Bm => "bm",
+        }
+    }
 }
 
 fn main() {
@@ -123,13 +157,15 @@ fn run(cli: &Cli) -> Result<(), GwError> {
         graph.total_weight()
     );
 
-    // Run GW algorithm with selected solver.
+    let backend = cli.solver.backend(graph.num_vertices());
+    println!("Solver:         {}", backend.name());
+
     let rounding = cli
         .rotation
         .map_or(Rounding::Hyperplane, Rounding::OutwardRotation);
     let start = Instant::now();
-    let result = match cli.solver {
-        SolverChoice::Ipm => {
+    let result = match backend {
+        Backend::Ipm => {
             let config = GwConfig {
                 num_trials: cli.trials,
                 ils_rounds: cli.ils_rounds,
@@ -142,7 +178,7 @@ fn run(cli: &Cli) -> Result<(), GwError> {
             };
             gw_maxcut(&graph, &config)?
         }
-        SolverChoice::Bm => {
+        Backend::Bm => {
             let config = GwBmConfig {
                 num_trials: cli.trials,
                 ils_rounds: cli.ils_rounds,
@@ -232,4 +268,31 @@ fn format_ratio(ratio: Option<f64>) -> String {
         || "undefined (the bound is 0)".to_string(),
         |r| format!("{r:.6}"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_runs_the_ipm_up_to_its_limit() {
+        assert_eq!(
+            SolverChoice::Auto.backend(AUTO_IPM_MAX_VERTICES),
+            Backend::Ipm
+        );
+    }
+
+    #[test]
+    fn auto_runs_bm_past_the_ipm_limit() {
+        assert_eq!(
+            SolverChoice::Auto.backend(AUTO_IPM_MAX_VERTICES + 1),
+            Backend::Bm
+        );
+    }
+
+    #[test]
+    fn an_explicit_solver_runs_at_any_size() {
+        assert_eq!(SolverChoice::Ipm.backend(10_000), Backend::Ipm);
+        assert_eq!(SolverChoice::Bm.backend(3), Backend::Bm);
+    }
 }

@@ -58,7 +58,7 @@ graph TD
     A["Graph G = (V, E)"] --> B["Laplacian L = D - W"]
     B --> C["SDP Relaxation<br/>C = -(1/4)L, X_ii = 1"]
 
-    C --> D["Dense IPM<br/>n &lt; 100"]
+    C --> D["Dense IPM<br/>n ≤ 100"]
     C --> E["Burer-Monteiro<br/>X = RRᵀ, n &gt; 100"]
 
     D --> F["Rounding Pipeline"]
@@ -95,7 +95,7 @@ cargo build --release
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--solver` | `ipm` | Solver backend: `ipm` (dense, exact) or `bm` (scalable) |
+| `--solver` | `auto` | Solver backend: `ipm` (dense, exact), `bm` (scalable), or `auto`: the IPM up to 100 vertices, BM past them |
 | `--time` | — | Time budget in seconds for `--solver bm`: up to `--restarts` restarts that fit (the first always runs to completion), then population refinement until the budget ends |
 | `--trials` | 100 | Number of hyperplane rounding trials |
 | `--ils-rounds` | 50 | Iterated local search rounds per trial |
