@@ -3,6 +3,7 @@
 //! Parses a graph from an input file, runs the Goemans-Williamson algorithm,
 //! and reports the cut value, SDP bound, and approximation ratio.
 
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -23,8 +24,8 @@ struct Cli {
     input: PathBuf,
 
     /// Number of random hyperplane rounding trials.
-    #[arg(long, default_value_t = 100)]
-    trials: usize,
+    #[arg(long, default_value_t = maxcut_sdp::maxcut::DEFAULT_TRIALS)]
+    trials: NonZeroUsize,
 
     /// SDP solver convergence tolerance.
     #[arg(long, default_value_t = 1e-8)]

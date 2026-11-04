@@ -23,6 +23,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use std::f64::consts::{FRAC_PI_2, TAU};
+use std::num::NonZeroUsize;
 
 /// An outward rotation angle `θ` in radians, within `[0, π/2]`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -65,7 +66,7 @@ impl Rounding {
 #[derive(Debug, Clone, Copy)]
 pub struct TrialPlan {
     /// Number of independent rounding trials.
-    pub trials: usize,
+    pub trials: NonZeroUsize,
     /// Iterated local search rounds applied to each trial's partition.
     pub ils_rounds: usize,
     /// How each trial rounds the SDP vectors.
@@ -272,7 +273,9 @@ pub fn multi_round_from_vectors(
 ) -> MaxCutResult {
     // Generate deterministic per-trial seeds from the base RNG, then
     // run trials in parallel with independent thread-local RNGs.
-    let seeds: Vec<u64> = (0..plan.trials).map(|_| rng.random::<u64>()).collect();
+    let seeds: Vec<u64> = (0..plan.trials.get())
+        .map(|_| rng.random::<u64>())
+        .collect();
 
     let (best_partition, best_cut) = seeds
         .par_iter()
@@ -298,7 +301,7 @@ pub fn multi_round_from_vectors(
         cut_value: best_cut,
         sdp_bound,
         approximation_ratio: ratio,
-        num_trials: plan.trials,
+        num_trials: plan.trials.get(),
     }
 }
 
@@ -312,7 +315,9 @@ pub fn multi_round_with_pool(
     pool_size: usize,
     rng: &mut impl Rng,
 ) -> (MaxCutResult, Vec<(Vec<bool>, f64)>) {
-    let seeds: Vec<u64> = (0..plan.trials).map(|_| rng.random::<u64>()).collect();
+    let seeds: Vec<u64> = (0..plan.trials.get())
+        .map(|_| rng.random::<u64>())
+        .collect();
 
     let mut all_results: Vec<(Vec<bool>, f64)> = seeds
         .par_iter()
@@ -341,7 +346,7 @@ pub fn multi_round_with_pool(
         cut_value: best_cut,
         sdp_bound,
         approximation_ratio: ratio,
-        num_trials: plan.trials,
+        num_trials: plan.trials.get(),
     };
 
     (result, all_results)

@@ -4,6 +4,7 @@ use maxcut_sdp::graph::Graph;
 use maxcut_sdp::maxcut::rounding::Rounding;
 use maxcut_sdp::maxcut::{GwBmConfig, GwConfig, gw_maxcut, gw_maxcut_bm};
 use maxcut_sdp::sdp::solver_bm::BmSolverConfig;
+use std::num::NonZeroUsize;
 
 /// Helper: build the 5-cycle `C_5` with unit weights (OPT = 4).
 fn five_cycle() -> Graph {
@@ -33,7 +34,7 @@ fn k4() -> Graph {
 fn bm_five_cycle_gw_guarantee() {
     let g = five_cycle();
     let config = GwBmConfig {
-        num_trials: 100,
+        num_trials: NonZeroUsize::new(100).unwrap_or_else(|| panic!("100 trials")),
         ils_rounds: 5,
         rounding: Rounding::Hyperplane,
         solver_config: BmSolverConfig {
@@ -63,7 +64,7 @@ fn bm_five_cycle_gw_guarantee() {
 fn bm_k4_gw_guarantee() {
     let g = k4();
     let config = GwBmConfig {
-        num_trials: 100,
+        num_trials: NonZeroUsize::new(100).unwrap_or_else(|| panic!("100 trials")),
         ils_rounds: 5,
         rounding: Rounding::Hyperplane,
         solver_config: BmSolverConfig {
@@ -93,14 +94,14 @@ fn bm_bound_close_to_ipm() {
     let g = five_cycle();
 
     let ipm_config = GwConfig {
-        num_trials: 10,
+        num_trials: NonZeroUsize::new(10).unwrap_or_else(|| panic!("10 trials")),
         seed: Some(42),
         ..GwConfig::default()
     };
     let ipm_result = gw_maxcut(&g, &ipm_config).unwrap_or_else(|_| panic!("ipm failed"));
 
     let bm_config = GwBmConfig {
-        num_trials: 10,
+        num_trials: NonZeroUsize::new(10).unwrap_or_else(|| panic!("10 trials")),
         ils_rounds: 5,
         rounding: Rounding::Hyperplane,
         solver_config: BmSolverConfig {
@@ -127,7 +128,7 @@ fn bm_bound_close_to_ipm() {
 fn bm_rank_override() {
     let g = k4();
     let config = GwBmConfig {
-        num_trials: 50,
+        num_trials: NonZeroUsize::new(50).unwrap_or_else(|| panic!("50 trials")),
         ils_rounds: 5,
         rounding: Rounding::Hyperplane,
         solver_config: BmSolverConfig {

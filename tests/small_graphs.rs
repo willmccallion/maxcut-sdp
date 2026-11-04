@@ -6,6 +6,7 @@
 use maxcut_sdp::graph::Graph;
 use maxcut_sdp::maxcut::exact::exact_maxcut;
 use maxcut_sdp::maxcut::{GwConfig, gw_maxcut};
+use std::num::NonZeroUsize;
 
 /// Triangle (`K_3`) with unit weights: OPT = 2 (cut any single vertex off).
 #[test]
@@ -92,7 +93,7 @@ fn five_cycle_gw() {
     let _ = g.add_edge(4, 0, 1.0);
 
     let config = GwConfig {
-        num_trials: 100,
+        num_trials: NonZeroUsize::new(100).unwrap_or_else(|| panic!("100 trials")),
         seed: Some(42),
         ..GwConfig::default()
     };

@@ -15,6 +15,7 @@
 pub mod exact;
 pub mod rounding;
 
+use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
 use crate::GwError;
@@ -42,11 +43,17 @@ pub struct MaxCutResult {
     pub num_trials: usize,
 }
 
+/// Rounding trials the configurations run by default.
+pub const DEFAULT_TRIALS: NonZeroUsize = match NonZeroUsize::new(100) {
+    Some(trials) => trials,
+    None => NonZeroUsize::MIN,
+};
+
 /// Configuration for the GW algorithm.
 #[derive(Debug, Clone)]
 pub struct GwConfig {
     /// Number of independent rounding trials.
-    pub num_trials: usize,
+    pub num_trials: NonZeroUsize,
     /// Number of iterated local search rounds per rounding trial.
     pub ils_rounds: usize,
     /// How each trial rounds the SDP vectors.
@@ -60,7 +67,7 @@ pub struct GwConfig {
 impl Default for GwConfig {
     fn default() -> Self {
         Self {
-            num_trials: 100,
+            num_trials: DEFAULT_TRIALS,
             ils_rounds: 50,
             rounding: Rounding::default(),
             solver_config: SolverConfig::default(),
@@ -73,7 +80,7 @@ impl Default for GwConfig {
 #[derive(Debug, Clone)]
 pub struct GwBmConfig {
     /// Number of independent rounding trials per BM restart.
-    pub num_trials: usize,
+    pub num_trials: NonZeroUsize,
     /// Number of iterated local search rounds per rounding trial.
     pub ils_rounds: usize,
     /// How each trial rounds the SDP vectors.
@@ -90,7 +97,7 @@ pub struct GwBmConfig {
 impl Default for GwBmConfig {
     fn default() -> Self {
         Self {
-            num_trials: 100,
+            num_trials: DEFAULT_TRIALS,
             ils_rounds: 50,
             rounding: Rounding::default(),
             solver_config: BmSolverConfig::default(),
@@ -200,7 +207,7 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
             pool_size,
             &mut rng,
         );
-        total_trials += config.num_trials;
+        total_trials += config.num_trials.get();
         candidate_pool.extend(top_partitions);
 
         if result.cut_value > best_cut {
