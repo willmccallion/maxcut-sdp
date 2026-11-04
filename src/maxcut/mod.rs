@@ -37,10 +37,21 @@ pub struct MaxCutResult {
     pub cut_value: f64,
     /// The SDP relaxation upper bound on the optimal cut.
     pub sdp_bound: f64,
-    /// The approximation ratio: `cut_value / sdp_bound`.
-    pub approximation_ratio: f64,
+    /// The approximation ratio `cut_value / sdp_bound`, or `None` when the
+    /// bound is zero and no ratio exists.
+    pub approximation_ratio: Option<f64>,
     /// Number of rounding trials performed.
     pub num_trials: usize,
+}
+
+/// Bounds within this fraction of a graph's total absolute weight of zero
+/// are numerical noise, not a bound a ratio can be taken against.
+const ZERO_BOUND_TOLERANCE: f64 = 1e-6;
+
+/// `cut / reference` for a graph whose total absolute weight is `scale`, or
+/// `None` when `reference` is zero up to noise, where no ratio is defined.
+pub fn cut_ratio(cut: f64, reference: f64, scale: f64) -> Option<f64> {
+    (reference > ZERO_BOUND_TOLERANCE * scale).then(|| cut / reference)
 }
 
 /// Rounding trials the configurations run by default.
@@ -286,11 +297,7 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
         ));
     }
 
-    let ratio = if best_sdp_bound > 1e-15 {
-        best_cut / best_sdp_bound
-    } else {
-        1.0
-    };
+    let ratio = cut_ratio(best_cut, best_sdp_bound, graph.total_abs_weight());
 
     Ok(MaxCutResult {
         partition: best_partition,

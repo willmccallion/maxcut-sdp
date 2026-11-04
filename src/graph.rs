@@ -121,6 +121,11 @@ impl Graph {
         w
     }
 
+    /// Returns the total absolute weight of all edges: the scale of any cut.
+    pub fn total_abs_weight(&self) -> f64 {
+        self.edges.iter().map(|&(_, _, weight)| weight.abs()).sum()
+    }
+
     /// Computes the cut value for a given vertex partition.
     ///
     /// The partition is encoded as a boolean slice: vertices with `partition[i] = true`

@@ -53,7 +53,7 @@ pub fn exact_maxcut_bounded(graph: &Graph, max_vertices: usize) -> Result<MaxCut
             partition: Vec::new(),
             cut_value: 0.0,
             sdp_bound: 0.0,
-            approximation_ratio: 1.0,
+            approximation_ratio: None,
             num_trials: 0,
         });
     }
@@ -102,7 +102,7 @@ pub fn exact_maxcut_bounded(graph: &Graph, max_vertices: usize) -> Result<MaxCut
         partition,
         cut_value: best_cut,
         sdp_bound: 0.0, // Not computed by exact solver.
-        approximation_ratio: 1.0,
+        approximation_ratio: None,
         num_trials: 0,
     })
 }

@@ -290,11 +290,7 @@ pub fn multi_round_from_vectors(
             |a, b| if b.1 > a.1 { b } else { a },
         );
 
-    let ratio = if sdp_bound > 1e-15 {
-        best_cut / sdp_bound
-    } else {
-        1.0
-    };
+    let ratio = super::cut_ratio(best_cut, sdp_bound, graph.total_abs_weight());
 
     MaxCutResult {
         partition: best_partition,
@@ -335,11 +331,7 @@ pub fn multi_round_with_pool(
     let best_partition = all_results.first().map_or_else(Vec::new, |r| r.0.clone());
     all_results.truncate(pool_size);
 
-    let ratio = if sdp_bound > 1e-15 {
-        best_cut / sdp_bound
-    } else {
-        1.0
-    };
+    let ratio = super::cut_ratio(best_cut, sdp_bound, graph.total_abs_weight());
 
     let result = MaxCutResult {
         partition: best_partition,

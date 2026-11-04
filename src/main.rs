@@ -11,7 +11,7 @@ use clap::Parser;
 use maxcut_sdp::GwError;
 use maxcut_sdp::maxcut::exact::exact_maxcut;
 use maxcut_sdp::maxcut::rounding::{RotationAngle, Rounding};
-use maxcut_sdp::maxcut::{GwBmConfig, GwConfig, gw_maxcut, gw_maxcut_bm};
+use maxcut_sdp::maxcut::{GwBmConfig, GwConfig, cut_ratio, gw_maxcut, gw_maxcut_bm};
 use maxcut_sdp::parser::{parse_auto, parse_biqmac, parse_dimacs};
 use maxcut_sdp::sdp::solver::SolverConfig;
 use maxcut_sdp::sdp::solver_bm::BmSolverConfig;
@@ -168,7 +168,10 @@ fn run(cli: &Cli) -> Result<(), GwError> {
     println!("\n--- Goemans-Williamson Result ---");
     println!("SDP bound:      {:.6}", result.sdp_bound);
     println!("GW cut value:   {:.6} (verified)", result.cut_value);
-    println!("Approx ratio:   {:.6}", result.approximation_ratio);
+    println!(
+        "Approx ratio:   {}",
+        format_ratio(result.approximation_ratio)
+    );
     println!("Rounding trials: {}", result.num_trials);
     println!("Total time:     {elapsed:.3?}");
 
@@ -187,10 +190,12 @@ fn run(cli: &Cli) -> Result<(), GwError> {
                 let exact_elapsed = exact_start.elapsed();
                 println!("\n--- Exact Max-Cut ---");
                 println!("Optimal cut:    {:.6}", exact_result.cut_value);
-                println!(
-                    "GW / OPT:       {:.6}",
-                    result.cut_value / exact_result.cut_value
+                let gw_over_opt = cut_ratio(
+                    result.cut_value,
+                    exact_result.cut_value,
+                    graph.total_abs_weight(),
                 );
+                println!("GW / OPT:       {}", format_ratio(gw_over_opt));
                 println!("Time:           {exact_elapsed:.3?}");
             }
             Err(e) => {
@@ -200,4 +205,12 @@ fn run(cli: &Cli) -> Result<(), GwError> {
     }
 
     Ok(())
+}
+
+/// A ratio to six places, or why there is none.
+fn format_ratio(ratio: Option<f64>) -> String {
+    ratio.map_or_else(
+        || "undefined (the bound is 0)".to_string(),
+        |r| format!("{r:.6}"),
+    )
 }
