@@ -5,9 +5,9 @@
 
 use maxcut_sdp::GwError;
 use maxcut_sdp::graph::Graph;
-use maxcut_sdp::sdp::SdpProblem;
 use maxcut_sdp::sdp::linalg::DenseMatrix;
 use maxcut_sdp::sdp::solver::{Solver, SolverConfig};
+use maxcut_sdp::sdp::{ConstraintMatrix, SdpProblem};
 
 /// Cholesky of a known 2×2 SPD matrix.
 #[test]
@@ -79,10 +79,10 @@ fn sdp_2x2_worked_example() {
     assert!(a1.is_ok());
 
     let mut problem = SdpProblem::new(c);
-    problem.add_constraint(
-        a1.unwrap_or_else(|_| panic!("from_vec failed")),
-        2.0, // tr(A1 X) = 2*x_12 = 2, so x_12 = 1
-    );
+    let constraint = ConstraintMatrix::Dense(a1.unwrap_or_else(|_| panic!("from_vec failed")));
+    // tr(A1 X) = 2*x_12 = 2, so x_12 = 1
+    let added = problem.add_constraint(constraint, 2.0);
+    assert!(added.is_ok());
 
     let solver = Solver::new(SolverConfig::default());
     let solution = solver.solve(&problem);

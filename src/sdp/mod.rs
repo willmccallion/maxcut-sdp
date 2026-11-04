@@ -26,9 +26,56 @@ use linalg::DenseMatrix;
 #[derive(Debug, Clone)]
 pub struct SdpConstraint {
     /// The constraint matrix `A_i`.
-    pub a: DenseMatrix,
+    pub a: ConstraintMatrix,
     /// The right-hand side scalar `b_i`.
     pub b: f64,
+}
+
+/// The matrix `A_i` of a constraint, kept in the form that is cheap for it.
+#[derive(Debug, Clone)]
+pub enum ConstraintMatrix {
+    /// `e_k e_kᵀ`, which fixes the diagonal entry `X_kk`. Held as `k`, so
+    /// Max-Cut's `n` constraints take `O(n)` memory instead of `O(n³)`.
+    DiagonalUnit(usize),
+    /// A general symmetric `n × n` matrix.
+    Dense(DenseMatrix),
+}
+
+impl ConstraintMatrix {
+    /// `⟨A, Y⟩ = tr(A Y)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GwError::DimensionMismatch`] if a dense `A` and `Y` differ in shape.
+    pub fn inner_product(&self, y: &DenseMatrix) -> Result<f64, GwError> {
+        match self {
+            Self::DiagonalUnit(k) => Ok(y.get(*k, *k)),
+            Self::Dense(a) => a.inner_product(y),
+        }
+    }
+
+    /// Adds `coeff · A` to `target`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GwError::DimensionMismatch`] if a dense `A` and `target` differ in shape.
+    pub fn add_scaled_to(&self, target: &mut DenseMatrix, coeff: f64) -> Result<(), GwError> {
+        match self {
+            Self::DiagonalUnit(k) => {
+                target.set(*k, *k, target.get(*k, *k) + coeff);
+                Ok(())
+            }
+            Self::Dense(a) => target.add_assign(&a.scale(coeff)),
+        }
+    }
+
+    /// Whether this is a matrix of an `n × n` problem.
+    const fn fits(&self, n: usize) -> bool {
+        match self {
+            Self::DiagonalUnit(k) => *k < n,
+            Self::Dense(a) => a.rows() == n && a.cols() == n,
+        }
+    }
 }
 
 /// A semidefinite program in standard form.
@@ -78,8 +125,20 @@ impl SdpProblem {
     }
 
     /// Adds an affine constraint `tr(A X) = b`.
-    pub fn add_constraint(&mut self, a: DenseMatrix, b: f64) {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GwError::InvalidMatrix`] if `a` is not a matrix of this
+    /// problem's dimension.
+    pub fn add_constraint(&mut self, a: ConstraintMatrix, b: f64) -> Result<(), GwError> {
+        if !a.fits(self.n) {
+            return Err(GwError::InvalidMatrix(format!(
+                "constraint matrix does not fit an {n} x {n} problem",
+                n = self.n
+            )));
+        }
         self.constraints.push(SdpConstraint { a, b });
+        Ok(())
     }
 
     /// Returns the number of constraints `m`.
@@ -102,7 +161,8 @@ impl SdpProblem {
     /// ```
     ///
     /// Each diagonal constraint uses `A_i = e_i e_i^T` (the matrix with a single
-    /// `1` at position `(i, i)`), with `b_i = 1`.
+    /// `1` at position `(i, i)`), with `b_i = 1`, held as
+    /// [`ConstraintMatrix::DiagonalUnit`].
     ///
     /// See [`maxcut/MATH.md`](../maxcut/MATH.md) §3 for the derivation.
     ///
@@ -122,9 +182,7 @@ impl SdpProblem {
 
         // Diagonal constraints: tr(E_ii X) = X_ii = 1
         for i in 0..n {
-            let mut a = DenseMatrix::zeros(n, n);
-            a.set(i, i, 1.0);
-            problem.add_constraint(a, 1.0);
+            problem.add_constraint(ConstraintMatrix::DiagonalUnit(i), 1.0)?;
         }
 
         Ok(problem)

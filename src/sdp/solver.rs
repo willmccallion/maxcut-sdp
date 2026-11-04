@@ -16,7 +16,7 @@
 //! and `m` is the number of constraints. See [`MATH.md`](./MATH.md) §5.
 
 use super::linalg::DenseMatrix;
-use super::{SdpProblem, SdpSolution};
+use super::{ConstraintMatrix, SdpProblem, SdpSolution};
 use crate::GwError;
 
 /// Centering parameter `σ`: each step targets `μ_next = σ μ`. See [`MATH.md`](./MATH.md) §3.6.
@@ -240,26 +240,17 @@ impl Solver {
     ) -> Result<(DenseMatrix, Vec<f64>), GwError> {
         let m = problem.constraints.len();
 
-        // Precompute W A_i W for each constraint.
-        let mut waw: Vec<DenseMatrix> = Vec::with_capacity(m);
-        for ci in &problem.constraints {
-            let wa = w
-                .mul(&ci.a)
-                .map_err(|e| GwError::SolverFailed(format!("Schur W*A: {e}")))?;
-            let waw_i = wa
-                .mul(w)
-                .map_err(|e| GwError::SolverFailed(format!("Schur W*A*W: {e}")))?;
-            waw.push(waw_i);
-        }
+        let scaled: Vec<ScaledConstraint<'_>> = problem
+            .constraints
+            .iter()
+            .map(|ci| ScaledConstraint::new(&ci.a, w))
+            .collect::<Result<_, _>>()?;
 
-        // M_ij = tr(A_i * W A_j W) = <A_i, WAW_j>
+        // M_ij = tr(A_i W A_j W)
         let mut schur = DenseMatrix::zeros(m, m);
         for i in 0..m {
-            for (j, waw_j) in waw.iter().enumerate().skip(i) {
-                let val = problem.constraints[i]
-                    .a
-                    .inner_product(waw_j)
-                    .map_err(|e| GwError::SolverFailed(format!("Schur ip: {e}")))?;
+            for j in i..m {
+                let val = scaled[i].schur_entry(&scaled[j], w)?;
                 schur.set(i, j, val);
                 schur.set(j, i, val);
             }
@@ -342,9 +333,8 @@ impl Solver {
 
         // ΔS = R_d − Σ Δy_i A_i
         let mut ds = Self::dual_residual(problem, y, s)?;
-        for (i, ci) in problem.constraints.iter().enumerate() {
-            let scaled = ci.a.scale(dy[i]);
-            ds.sub_assign(&scaled)
+        for (ci, &dyi) in problem.constraints.iter().zip(&dy) {
+            ci.a.add_scaled_to(&mut ds, -dyi)
                 .map_err(|e| GwError::SolverFailed(format!("ds update: {e}")))?;
         }
 
@@ -459,12 +449,51 @@ impl Solver {
     ) -> Result<DenseMatrix, GwError> {
         let mut rd = problem.c.clone();
         for (ci, &yi) in problem.constraints.iter().zip(y) {
-            rd.add_assign(&ci.a.scale(-yi))
+            ci.a.add_scaled_to(&mut rd, -yi)
                 .map_err(|e| GwError::SolverFailed(format!("Rd accum: {e}")))?;
         }
         rd.sub_assign(s)
             .map_err(|e| GwError::SolverFailed(format!("Rd sub S: {e}")))?;
         Ok(rd)
+    }
+}
+
+/// A constraint as the Schur complement needs it under NT scaling `W`.
+enum ScaledConstraint<'a> {
+    /// `e_k e_kᵀ`, whose `W A W = w_k w_kᵀ` is never formed.
+    Diagonal(usize),
+    /// A dense `A` with its `W A W`.
+    Dense {
+        a: &'a DenseMatrix,
+        waw: DenseMatrix,
+    },
+}
+
+impl<'a> ScaledConstraint<'a> {
+    fn new(a: &'a ConstraintMatrix, w: &DenseMatrix) -> Result<Self, GwError> {
+        match a {
+            ConstraintMatrix::DiagonalUnit(k) => Ok(Self::Diagonal(*k)),
+            ConstraintMatrix::Dense(a) => {
+                let waw = w
+                    .mul(a)
+                    .and_then(|wa| wa.mul(w))
+                    .map_err(|e| GwError::SolverFailed(format!("Schur W*A*W: {e}")))?;
+                Ok(Self::Dense { a, waw })
+            }
+        }
+    }
+
+    /// `tr(A_self W A_other W)`: `W_pq²` for two diagonal constraints, and
+    /// `(W A W)_kk` for a dense one against `e_k e_kᵀ`.
+    fn schur_entry(&self, other: &Self, w: &DenseMatrix) -> Result<f64, GwError> {
+        match (self, other) {
+            (Self::Diagonal(p), Self::Diagonal(q)) => Ok(w.get(*p, *q).powi(2)),
+            (Self::Dense { waw, .. }, Self::Diagonal(k))
+            | (Self::Diagonal(k), Self::Dense { waw, .. }) => Ok(waw.get(*k, *k)),
+            (Self::Dense { a, .. }, Self::Dense { waw, .. }) => a
+                .inner_product(waw)
+                .map_err(|e| GwError::SolverFailed(format!("Schur ip: {e}"))),
+        }
     }
 }
 
