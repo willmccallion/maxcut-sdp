@@ -300,16 +300,27 @@ impl BmSolver {
 /// Pre-slicing to `vi`/`vj` eliminates bounds checks. The `dot()` kernel
 /// uses 4-way unrolling + FMA for full vectorization.
 fn compute_objective_sparse(edges: &[(usize, usize, f64)], vdata: &[f64], r: usize) -> f64 {
-    edges
-        .par_iter()
-        .map(|&(ci, cj, w)| {
-            let vi = &vdata[ci..ci + r];
-            let vj = &vdata[cj..cj + r];
-            let half_w = 0.5 * w;
-            half_w.mul_add(dot(vi, vj), -half_w)
+    let partial_sums: Vec<f64> = edges
+        .par_chunks(SUM_CHUNK)
+        .map(|chunk| {
+            chunk
+                .iter()
+                .map(|&(ci, cj, w)| {
+                    let vi = &vdata[ci..ci + r];
+                    let vj = &vdata[cj..cj + r];
+                    let half_w = 0.5 * w;
+                    half_w.mul_add(dot(vi, vj), -half_w)
+                })
+                .sum::<f64>()
         })
-        .sum()
+        .collect();
+    partial_sums.iter().sum()
 }
+
+/// Terms per partial sum of a parallel reduction. The chunks are fixed and
+/// their sums added in order, so the result's rounding, and with it a seeded
+/// run, does not depend on how rayon schedules the work.
+const SUM_CHUNK: usize = 1024;
 
 /// Fused Riemannian gradient computation: Euclidean gradient + tangent projection + norm.
 ///
@@ -348,18 +359,22 @@ fn compute_riemannian_gradient(
     }
 
     // 3. Per-column tangent projection + norm² (parallel — columns are independent).
-    let norm_sq: f64 = gdata
-        .par_chunks_mut(r)
-        .zip(vdata.par_chunks(r))
-        .map(|(g_col, v_col)| {
-            let d = dot(v_col, g_col);
-            for k in 0..g_col.len() {
-                g_col[k] = d.mul_add(-v_col[k], g_col[k]);
+    let partial_sums: Vec<f64> = gdata
+        .par_chunks_mut(r * SUM_CHUNK)
+        .zip(vdata.par_chunks(r * SUM_CHUNK))
+        .map(|(g_cols, v_cols)| {
+            let mut norm_sq = 0.0_f64;
+            for (g_col, v_col) in g_cols.chunks_mut(r).zip(v_cols.chunks(r)) {
+                let d = dot(v_col, g_col);
+                for k in 0..g_col.len() {
+                    g_col[k] = d.mul_add(-v_col[k], g_col[k]);
+                }
+                norm_sq += dot(g_col, g_col);
             }
-            dot(g_col, g_col)
+            norm_sq
         })
-        .sum();
-    norm_sq.sqrt()
+        .collect();
+    partial_sums.iter().sum::<f64>().sqrt()
 }
 
 /// Projects each column of `h` onto the tangent space at the corresponding column of `v`.

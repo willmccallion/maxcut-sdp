@@ -22,6 +22,7 @@ use crate::sdp::linalg::DenseMatrix;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
+use std::cmp::Ordering;
 use std::f64::consts::{FRAC_PI_2, TAU};
 use std::num::NonZeroUsize;
 
@@ -277,17 +278,24 @@ pub fn multi_round_from_vectors(
         .map(|_| rng.random::<u64>())
         .collect();
 
-    let (best_partition, best_cut) = seeds
+    // Trials are indexed so that equal cuts go to the earliest, whatever
+    // order rayon combines them in.
+    let (_, best_partition, best_cut) = seeds
         .par_iter()
-        .map(|&seed| {
+        .enumerate()
+        .map(|(trial, &seed)| {
             let mut trial_rng = StdRng::seed_from_u64(seed);
             let mut partition = plan.rounding.partition(vectors, &mut trial_rng);
             let cut = iterated_local_search(&mut partition, graph, plan.ils_rounds, &mut trial_rng);
-            (partition, cut)
+            (trial, partition, cut)
         })
         .reduce(
-            || (Vec::new(), f64::NEG_INFINITY),
-            |a, b| if b.1 > a.1 { b } else { a },
+            || (usize::MAX, Vec::new(), f64::NEG_INFINITY),
+            |a, b| match b.2.total_cmp(&a.2) {
+                Ordering::Greater => b,
+                Ordering::Equal if b.0 < a.0 => b,
+                _ => a,
+            },
         );
 
     let ratio = super::cut_ratio(best_cut, sdp_bound, graph.total_abs_weight());
@@ -325,8 +333,8 @@ pub fn multi_round_with_pool(
         })
         .collect();
 
-    // Sort descending by cut value, keep top pool_size.
-    all_results.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    // Sort descending by cut value, equal cuts in trial order, keep top pool_size.
+    all_results.sort_by(|a, b| b.1.total_cmp(&a.1));
     let best_cut = all_results.first().map_or(f64::NEG_INFINITY, |r| r.1);
     let best_partition = all_results.first().map_or_else(Vec::new, |r| r.0.clone());
     all_results.truncate(pool_size);
