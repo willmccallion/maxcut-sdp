@@ -15,7 +15,7 @@
 //!
 //! See [`MATH.md`](../MATH.md) §4–§5 for the rounding analysis.
 
-use super::MaxCutResult;
+use super::Cut;
 use crate::GwError;
 use crate::graph::Graph;
 use crate::sdp::linalg::DenseMatrix;
@@ -291,9 +291,8 @@ pub fn multi_round_from_vectors(
     vectors: &DenseMatrix,
     graph: &Graph,
     plan: TrialPlan,
-    sdp_bound: f64,
     rng: &mut impl Rng,
-) -> MaxCutResult {
+) -> Cut {
     // Generate deterministic per-trial seeds from the base RNG, then
     // run trials in parallel with independent thread-local RNGs.
     let seeds: Vec<u64> = (0..plan.trials.get())
@@ -320,58 +319,48 @@ pub fn multi_round_from_vectors(
             },
         );
 
-    let ratio = super::cut_ratio(best_cut, sdp_bound, graph.total_abs_weight());
-
-    MaxCutResult {
+    Cut {
         partition: best_partition,
         cut_value: best_cut,
-        sdp_bound,
-        approximation_ratio: ratio,
-        num_trials: plan.trials.get(),
     }
 }
 
-/// Like `multi_round_from_vectors`, but also returns the top-K partitions
-/// for use as diverse starting points in refinement.
+/// Like `multi_round_from_vectors`, but also returns the best `pool_size`
+/// cuts, best first, as diverse starting points for refinement.
 pub fn multi_round_with_pool(
     vectors: &DenseMatrix,
     graph: &Graph,
     plan: TrialPlan,
-    sdp_bound: f64,
     pool_size: usize,
     rng: &mut impl Rng,
-) -> (MaxCutResult, Vec<(Vec<bool>, f64)>) {
+) -> (Cut, Vec<Cut>) {
     let seeds: Vec<u64> = (0..plan.trials.get())
         .map(|_| rng.random::<u64>())
         .collect();
 
-    let mut all_results: Vec<(Vec<bool>, f64)> = seeds
+    let mut cuts: Vec<Cut> = seeds
         .par_iter()
         .map(|&seed| {
             let mut trial_rng = StdRng::seed_from_u64(seed);
             let mut partition = plan.rounding.partition(vectors, &mut trial_rng);
-            let cut = iterated_local_search(&mut partition, graph, plan.ils_rounds, &mut trial_rng);
-            (partition, cut)
+            let cut_value =
+                iterated_local_search(&mut partition, graph, plan.ils_rounds, &mut trial_rng);
+            Cut {
+                partition,
+                cut_value,
+            }
         })
         .collect();
 
-    // Sort descending by cut value, equal cuts in trial order, keep top pool_size.
-    all_results.sort_by(|a, b| b.1.total_cmp(&a.1));
-    let best_cut = all_results.first().map_or(f64::NEG_INFINITY, |r| r.1);
-    let best_partition = all_results.first().map_or_else(Vec::new, |r| r.0.clone());
-    all_results.truncate(pool_size);
+    // Sort descending by cut value, equal cuts in trial order.
+    cuts.sort_by(|a, b| b.cut_value.total_cmp(&a.cut_value));
+    let best = cuts.first().cloned().unwrap_or(Cut {
+        partition: Vec::new(),
+        cut_value: f64::NEG_INFINITY,
+    });
+    cuts.truncate(pool_size);
 
-    let ratio = super::cut_ratio(best_cut, sdp_bound, graph.total_abs_weight());
-
-    let result = MaxCutResult {
-        partition: best_partition,
-        cut_value: best_cut,
-        sdp_bound,
-        approximation_ratio: ratio,
-        num_trials: plan.trials.get(),
-    };
-
-    (result, all_results)
+    (best, cuts)
 }
 
 /// Runs multiple rounding trials and returns the best cut found.
@@ -386,13 +375,10 @@ pub fn multi_round(
     x: &DenseMatrix,
     graph: &Graph,
     plan: TrialPlan,
-    sdp_bound: f64,
     rng: &mut impl Rng,
-) -> Result<MaxCutResult, GwError> {
+) -> Result<Cut, GwError> {
     let vectors = extract_vectors(x)?;
-    Ok(multi_round_from_vectors(
-        &vectors, graph, plan, sdp_bound, rng,
-    ))
+    Ok(multi_round_from_vectors(&vectors, graph, plan, rng))
 }
 
 #[cfg(test)]

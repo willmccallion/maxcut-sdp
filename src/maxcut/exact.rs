@@ -7,7 +7,7 @@
 //! The inner loop is optimized to avoid allocation: the partition is decoded
 //! from the integer bitmask directly.
 
-use super::MaxCutResult;
+use super::Cut;
 use crate::GwError;
 use crate::graph::Graph;
 
@@ -22,7 +22,7 @@ const MAX_MASK_VERTICES: usize = 63;
 /// # Errors
 ///
 /// Returns [`GwError::InvalidGraph`] if the graph has more than 24 vertices.
-pub fn exact_maxcut(graph: &Graph) -> Result<MaxCutResult, GwError> {
+pub fn exact_maxcut(graph: &Graph) -> Result<Cut, GwError> {
     exact_maxcut_bounded(graph, 24)
 }
 
@@ -40,7 +40,7 @@ pub fn exact_maxcut(graph: &Graph) -> Result<MaxCutResult, GwError> {
 ///
 /// Returns [`GwError::InvalidGraph`] if `graph.num_vertices() > max_vertices`,
 /// or past the 63 vertices a bitmask holds, whatever `max_vertices` is.
-pub fn exact_maxcut_bounded(graph: &Graph, max_vertices: usize) -> Result<MaxCutResult, GwError> {
+pub fn exact_maxcut_bounded(graph: &Graph, max_vertices: usize) -> Result<Cut, GwError> {
     let n = graph.num_vertices();
     let max_vertices = max_vertices.min(MAX_MASK_VERTICES);
     if n > max_vertices {
@@ -49,12 +49,9 @@ pub fn exact_maxcut_bounded(graph: &Graph, max_vertices: usize) -> Result<MaxCut
         )));
     }
     if n == 0 {
-        return Ok(MaxCutResult {
+        return Ok(Cut {
             partition: Vec::new(),
             cut_value: 0.0,
-            sdp_bound: 0.0,
-            approximation_ratio: None,
-            num_trials: 0,
         });
     }
 
@@ -98,11 +95,8 @@ pub fn exact_maxcut_bounded(graph: &Graph, max_vertices: usize) -> Result<MaxCut
         partition.push((best_mask >> i) & 1 == 1);
     }
 
-    Ok(MaxCutResult {
+    Ok(Cut {
         partition,
         cut_value: best_cut,
-        sdp_bound: 0.0, // Not computed by exact solver.
-        approximation_ratio: None,
-        num_trials: 0,
     })
 }

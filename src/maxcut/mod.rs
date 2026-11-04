@@ -29,6 +29,15 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 
+/// A partition of the vertices and the weight of the edges it cuts.
+#[derive(Debug, Clone)]
+pub struct Cut {
+    /// `partition[i] = true` means vertex `i` is in set `S`.
+    pub partition: Vec<bool>,
+    /// The total weight of edges crossing the partition.
+    pub cut_value: f64,
+}
+
 /// The result of running the Goemans-Williamson algorithm.
 #[derive(Debug, Clone)]
 pub struct MaxCutResult {
@@ -180,7 +189,16 @@ pub fn gw_maxcut(graph: &Graph, config: &GwConfig) -> Result<MaxCutResult, GwErr
         ils_rounds: config.ils_rounds,
         rounding: config.rounding,
     };
-    rounding::multi_round(&solution.x, graph, plan, sdp_bound, &mut rng)
+    let best = rounding::multi_round(&solution.x, graph, plan, &mut rng)?;
+    let ratio = cut_ratio(best.cut_value, sdp_bound, graph.total_abs_weight());
+
+    Ok(MaxCutResult {
+        partition: best.partition,
+        cut_value: best.cut_value,
+        sdp_bound,
+        approximation_ratio: ratio,
+        num_trials: config.num_trials.get(),
+    })
 }
 
 /// Runs the GW Max-Cut algorithm using the Burer-Monteiro low-rank solver.
@@ -217,7 +235,7 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
     let mut total_trials = 0_usize;
 
     // Collect top partitions from all restarts for the refinement pool.
-    let mut candidate_pool: Vec<(Vec<bool>, f64)> = Vec::new();
+    let mut candidate_pool: Vec<Cut> = Vec::new();
 
     let deadline = config.time_limit.map(|limit| start + limit);
     let mut last_restart = Duration::ZERO;
@@ -244,14 +262,8 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
             ils_rounds: config.ils_rounds,
             rounding: config.rounding,
         };
-        let (result, top_partitions) = rounding::multi_round_with_pool(
-            &solution.vectors,
-            graph,
-            plan,
-            sdp_bound,
-            pool_size,
-            &mut rng,
-        );
+        let (result, top_partitions) =
+            rounding::multi_round_with_pool(&solution.vectors, graph, plan, pool_size, &mut rng);
         total_trials += config.num_trials.get();
         candidate_pool.extend(top_partitions);
 
@@ -273,16 +285,15 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
     // population of diverse partitions and refine them in parallel.
     if let Some(deadline) = deadline {
         // Build pool from the best partitions across all restarts.
-        candidate_pool
-            .sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        candidate_pool.sort_by(|a, b| b.cut_value.total_cmp(&a.cut_value));
         candidate_pool.truncate(pool_size);
 
         // Give each pool member its own RNG for parallel execution.
         let mut pool: Vec<(Vec<bool>, f64, StdRng)> = candidate_pool
             .into_iter()
-            .map(|(p, c)| {
+            .map(|cut| {
                 let seed: u64 = rng.random();
-                (p, c, StdRng::seed_from_u64(seed))
+                (cut.partition, cut.cut_value, StdRng::seed_from_u64(seed))
             })
             .collect();
 
