@@ -25,6 +25,7 @@ use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::f64::consts::{FRAC_PI_2, TAU};
 use std::num::NonZeroUsize;
+use std::time::Instant;
 
 /// An outward rotation angle `θ` in radians, within `[0, π/2]`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -203,6 +204,10 @@ pub fn one_flip_local_search(partition: &mut [bool], graph: &Graph) -> f64 {
     graph.cut_value(partition)
 }
 
+/// Rounds in one cycle of iterated local search's perturbation sizes: the
+/// largest comes once per cycle.
+pub const PERTURBATION_CYCLE_ROUNDS: usize = 20;
+
 /// Iterated local search: escapes 1-flip local optima via random perturbation.
 ///
 /// Starting from a partition (not necessarily a local optimum), performs
@@ -216,6 +221,18 @@ pub fn iterated_local_search(
     rounds: usize,
     rng: &mut impl Rng,
 ) -> f64 {
+    iterated_local_search_until(partition, graph, rounds, None, rng).0
+}
+
+/// [`iterated_local_search`] that also stops starting rounds once
+/// `deadline` has passed. Returns the cut and the rounds it ran.
+pub fn iterated_local_search_until(
+    partition: &mut [bool],
+    graph: &Graph,
+    rounds: usize,
+    deadline: Option<Instant>,
+    rng: &mut impl Rng,
+) -> (f64, usize) {
     let n = graph.num_vertices();
     let k_small = 1_usize.max(n / 100);
     let k_medium = 1_usize.max(n / 10);
@@ -224,10 +241,15 @@ pub fn iterated_local_search(
     let mut best_cut = one_flip_local_search(partition, graph);
     let mut best_partition = partition.to_vec();
 
+    let mut rounds_run = 0;
     for round in 0..rounds {
+        if deadline.is_some_and(|d| Instant::now() >= d) {
+            break;
+        }
+        rounds_run += 1;
         // Tiered perturbation: small most of the time, medium every 5th,
         // large every 20th to break out of deep basins.
-        let k = if round % 20 == 19 {
+        let k = if round % PERTURBATION_CYCLE_ROUNDS == PERTURBATION_CYCLE_ROUNDS - 1 {
             k_large
         } else if round % 5 == 4 {
             k_medium
@@ -250,7 +272,7 @@ pub fn iterated_local_search(
     }
 
     partition.copy_from_slice(&best_partition);
-    best_cut
+    (best_cut, rounds_run)
 }
 
 /// Runs multiple rounding trials from pre-extracted vectors.

@@ -59,8 +59,9 @@ struct Cli {
     #[arg(long, default_value_t = 50)]
     ils_rounds: usize,
 
-    /// Time budget in seconds. When set, the solver runs as many
-    /// restart+round cycles as fit within this duration.
+    /// Time budget in seconds (BM only). Restarts after the first start only
+    /// if they fit, and the time left refines the best cuts; the first
+    /// restart always completes.
     #[arg(long)]
     time: Option<u64>,
 

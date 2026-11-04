@@ -96,7 +96,7 @@ cargo build --release
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--solver` | `ipm` | Solver backend: `ipm` (dense, exact) or `bm` (scalable) |
-| `--time` | — | Time budget in seconds (restarts + refinement) |
+| `--time` | — | Time budget in seconds for `--solver bm`: up to `--restarts` restarts that fit (the first always runs to completion), then population refinement until the budget ends |
 | `--trials` | 100 | Number of hyperplane rounding trials |
 | `--ils-rounds` | 50 | Iterated local search rounds per trial |
 | `--rotation` | off | Round with Zwick's outward rotation by this angle in radians, within $[0, \pi/2]$ |

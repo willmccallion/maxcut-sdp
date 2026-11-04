@@ -54,6 +54,12 @@ pub fn cut_ratio(cut: f64, reference: f64, scale: f64) -> Option<f64> {
     (reference > ZERO_BOUND_TOLERANCE * scale).then(|| cut / reference)
 }
 
+/// Whether a step expected to take `expected`, started at `now`, finishes by
+/// `deadline`; always when there is none.
+fn fits_before(deadline: Option<Instant>, now: Instant, expected: Duration) -> bool {
+    deadline.is_none_or(|deadline| now + expected <= deadline)
+}
+
 /// Rounding trials the configurations run by default.
 pub const DEFAULT_TRIALS: NonZeroUsize = match NonZeroUsize::new(100) {
     Some(trials) => trials,
@@ -100,8 +106,11 @@ pub struct GwBmConfig {
     pub solver_config: BmSolverConfig,
     /// Optional RNG seed for reproducibility (used for both solver and rounding).
     pub seed: Option<u64>,
-    /// Optional time budget. When set, the solver runs as many restart+round
-    /// cycles as fit within this duration, ignoring `num_restarts`.
+    /// Optional time budget. When set, a restart after the first starts only
+    /// if, taking as long as the one before, it would finish within the
+    /// budget, and whatever time is left refines the best cuts with iterated
+    /// local search. The first restart always completes, so a budget shorter
+    /// than one solve is exceeded by it.
     pub time_limit: Option<Duration>,
 }
 
@@ -192,8 +201,15 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
     // Collect top partitions from all restarts for the refinement pool.
     let mut candidate_pool: Vec<(Vec<bool>, f64)> = Vec::new();
 
+    let deadline = config.time_limit.map(|limit| start + limit);
+    let mut last_restart = Duration::ZERO;
     let num_restarts = config.solver_config.num_restarts.max(1);
     for restart in 0..num_restarts {
+        let restart_start = Instant::now();
+        if restart > 0 && !fits_before(deadline, restart_start, last_restart) {
+            eprintln!("Time limit: stopping after {restart}/{num_restarts} restarts");
+            break;
+        }
         let ctx = if best_cut > f64::NEG_INFINITY {
             Some(best_cut)
         } else {
@@ -232,11 +248,12 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
             result.cut_value,
             start.elapsed()
         );
+        last_restart = restart_start.elapsed();
     }
 
     // Refinement phase: if a time budget is set and time remains, maintain a
     // population of diverse partitions and refine them in parallel.
-    if let Some(limit) = config.time_limit {
+    if let Some(deadline) = deadline {
         // Build pool from the best partitions across all restarts.
         candidate_pool
             .sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -254,14 +271,23 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
         let mut rounds_done = 0_usize;
         let mut last_report = start.elapsed();
         let report_interval = Duration::from_secs(10);
-        let batch = 50;
-        while start.elapsed() < limit {
-            // Run ILS on all pool members in parallel.
-            pool.par_iter_mut().for_each(|(partition, cut, slot_rng)| {
-                let new_cut = rounding::iterated_local_search(partition, graph, batch, slot_rng);
-                *cut = new_cut;
-            });
-            rounds_done += batch * pool.len();
+        while Instant::now() < deadline {
+            // Run ILS on all pool members in parallel, each stopping at the deadline.
+            let rounds: usize = pool
+                .par_iter_mut()
+                .map(|(partition, cut, slot_rng)| {
+                    let (new_cut, rounds) = rounding::iterated_local_search_until(
+                        partition,
+                        graph,
+                        rounding::PERTURBATION_CYCLE_ROUNDS,
+                        Some(deadline),
+                        slot_rng,
+                    );
+                    *cut = new_cut;
+                    rounds
+                })
+                .sum();
+            rounds_done += rounds;
 
             // Check for improvements across all slots.
             for (slot, (partition, cut, _)) in pool.iter().enumerate() {
@@ -306,4 +332,30 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
         approximation_ratio: ratio,
         num_trials: total_trials,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SECOND: Duration = Duration::from_secs(1);
+
+    #[test]
+    fn a_step_fits_when_it_ends_by_the_deadline() {
+        let now = Instant::now();
+
+        assert!(fits_before(Some(now + 2 * SECOND), now, SECOND));
+    }
+
+    #[test]
+    fn a_step_does_not_fit_when_it_would_end_after_the_deadline() {
+        let now = Instant::now();
+
+        assert!(!fits_before(Some(now + SECOND), now, 2 * SECOND));
+    }
+
+    #[test]
+    fn every_step_fits_without_a_deadline() {
+        assert!(fits_before(None, Instant::now(), Duration::MAX / 2));
+    }
 }
