@@ -432,11 +432,15 @@ Using $r \geq r^{*}$ guarantees that the BM formulation can represent the SDP op
 
 ### 7.3 No Spurious Local Minima
 
-**Theorem (Boumal, Voroninski, Bandeira 2016):** When $r \geq \sqrt{2n}$, every second-order
-critical point of $f(V)$ on the product of spheres is a global optimum of the SDP relaxation.
+**Theorem (Boumal, Voroninski, Bandeira 2016):** For almost every cost matrix, when
+$\frac{r(r+1)}{2} > n$, every second-order critical point of $f(V)$ on the product of spheres
+is a global optimum of the SDP relaxation. The default rank $r = \lceil\sqrt{2n}\,\rceil$
+meets the condition.
 
-This means that gradient descent (with sufficient rank) converges to the SDP optimum
-regardless of initialization — there are no spurious local minima to get trapped in.
+So with enough rank there are no spurious local minima to get trapped in. The theorem is about
+exact critical points, though: the solver stops once its gradient or its progress is small, at a
+point whose objective can still sit below the SDP's value. BM's objective is therefore no upper
+bound on the cut; §7.10 certifies one.
 
 ### 7.4 Product-of-Spheres Manifold
 
@@ -511,7 +515,31 @@ Parameters: $c_1 = 10^{-4}$, $\beta = 0.5$, $\alpha_0 = 1.0$.
 | **Iterations** | $O(n \log(1/\varepsilon))$ worst case, ~20 in practice | $O(1/\varepsilon)$ (gradient descent) |
 | **Memory** | $O(n^2)$ | $O(n \cdot r)$ |
 | **Practical limit** | $n \approx 100$–$200$ | $n \approx 10{,}000+$ (sparse) |
-| **Guarantee** | Exact SDP solution | Global SDP optimum (when $r \geq \sqrt{2n}$) |
+| **Guarantee** | Certified bound (§7.10) | Certified bound (§7.10) up to $n = 3{,}000$; past it, the objective at a near-critical point |
 
 For a sparse graph with $|E| = O(n)$ and $r = O(\sqrt{n})$, the per-iteration cost is
 $O(n^{3/2})$ — a factor of $n^{5/2}$ improvement over the dense IPM.
+
+### 7.10 Certifying the Bound
+
+Weak duality (§2) turns any $y \in \mathbb{R}^n$ into an upper bound, feasible or not. With
+$S = C - \text{Diag}(y)$, every feasible $X$ has $\langle C, X \rangle = \sum_i y_i + \langle S, X \rangle$,
+and $\langle S, X \rangle \geq n \min(0, \lambda_{\min}(S))$ because $X \succeq 0$ and
+$\text{tr}\, X = n$. So
+
+$$
+\text{SDP} = -\min_X \langle C, X \rangle \;\leq\; -\sum_i y_i + n \max\bigl(0, -\lambda_{\min}(S)\bigr)
+$$
+
+The IPM evaluates this at its final dual $y$. BM evaluates it at the multipliers its first-order
+condition $(C - \text{Diag}(y))\,V = 0$ determines:
+
+$$
+y_i = (C\,VV^\top)_{ii} = \sum_{j:\,(i,j) \in E} \frac{w_{ij}}{4} \bigl(\langle v_i, v_j \rangle - 1\bigr)
+$$
+
+When BM has converged, $S$ is positive semidefinite up to its tolerance and the bound meets BM's
+objective; when it stopped early, the $\lambda_{\min}$ term pays for what it lacks. The cost is
+$\lambda_{\min}$ of a dense $n \times n$ matrix (§6), $O(n^3)$ and about 3 s at $n = 3{,}000$, so BM
+certifies graphs up to that size and past it reports its objective as the relaxation value, not a
+bound.

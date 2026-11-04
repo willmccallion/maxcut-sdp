@@ -114,12 +114,11 @@ fn bm_bound_close_to_ipm() {
     let bm_result = gw_maxcut_bm(&g, &bm_config).unwrap_or_else(|_| panic!("bm failed"));
 
     // SDP bounds should be within 1%.
-    let rel_diff = (ipm_result.sdp_bound - bm_result.sdp_bound).abs() / ipm_result.sdp_bound;
+    let (ipm_bound, bm_bound) = (ipm_result.sdp_bound.value(), bm_result.sdp_bound.value());
+    let rel_diff = (ipm_bound - bm_bound).abs() / ipm_bound;
     assert!(
         rel_diff < 0.01,
-        "IPM bound = {}, BM bound = {}, relative diff = {rel_diff}",
-        ipm_result.sdp_bound,
-        bm_result.sdp_bound
+        "IPM bound = {ipm_bound}, BM bound = {bm_bound}, relative diff = {rel_diff}"
     );
 }
 

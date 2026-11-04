@@ -22,7 +22,7 @@ use crate::GwError;
 use crate::graph::Graph;
 use crate::maxcut::rounding::{Rounding, TrialPlan};
 use crate::sdp::SdpProblem;
-use crate::sdp::linalg::DenseMatrix;
+use crate::sdp::linalg::{DenseMatrix, col, dot};
 use crate::sdp::solver::{Solver, SolverConfig};
 use crate::sdp::solver_bm::{BmSolver, BmSolverConfig};
 use rand::rngs::StdRng;
@@ -45,14 +45,48 @@ pub struct MaxCutResult {
     pub partition: Vec<bool>,
     /// The cut value (total weight of edges crossing the partition).
     pub cut_value: f64,
-    /// The SDP relaxation upper bound on the optimal cut.
-    pub sdp_bound: f64,
+    /// What the SDP relaxation established about the optimal cut.
+    pub sdp_bound: SdpBound,
     /// The approximation ratio `cut_value / sdp_bound`, or `None` when the
-    /// bound is zero and no ratio exists.
+    /// bound is uncertified or zero and no ratio exists.
     pub approximation_ratio: Option<f64>,
     /// Number of rounding trials performed.
     pub num_trials: usize,
 }
+
+/// What the SDP stage established about the maximum cut.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SdpBound {
+    /// An upper bound on every cut, certified from a dual solution.
+    Certified(f64),
+    /// The relaxation's objective where the solver stopped. It lies at or
+    /// below the SDP's value, so it bounds no cut; BM reports this for
+    /// graphs past [`MAX_CERTIFIED_VERTICES`].
+    Relaxation(f64),
+}
+
+impl SdpBound {
+    /// The bound or relaxation value.
+    pub const fn value(self) -> f64 {
+        match self {
+            Self::Certified(value) | Self::Relaxation(value) => value,
+        }
+    }
+
+    /// `cut / bound` for a graph whose total absolute weight is `scale`, or
+    /// `None` when the bound is uncertified or zero.
+    fn ratio(self, cut: f64, scale: f64) -> Option<f64> {
+        match self {
+            Self::Certified(bound) => cut_ratio(cut, bound, scale),
+            Self::Relaxation(_) => None,
+        }
+    }
+}
+
+/// Largest graph whose BM bound is certified. The certificate's dense
+/// eigenvalue takes about 3 s and two 72 MB matrices at this size, and grows
+/// as `n³` past it.
+pub const MAX_CERTIFIED_VERTICES: usize = 3000;
 
 /// Bounds within this fraction of a graph's total absolute weight of zero
 /// are numerical noise, not a bound a ratio can be taken against.
@@ -71,14 +105,42 @@ pub fn cut_ratio(cut: f64, reference: f64, scale: f64) -> Option<f64> {
 /// `−min tr(C X)` is at most `−Σ yᵢ + n·max(0, −λ_min(S))`, which is the
 /// dual objective when `y` is feasible and corrects it by what `y` lacks
 /// when it is not. Exact up to the floating-point accuracy of `λ_min`.
-fn certified_bound(c: &DenseMatrix, y: &[f64]) -> Result<f64, GwError> {
-    let mut s = c.clone();
+fn certified_bound(cost: DenseMatrix, y: &[f64]) -> Result<f64, GwError> {
+    let mut s = cost;
     for (i, &yi) in y.iter().enumerate() {
         s.set(i, i, s.get(i, i) - yi);
     }
     let lambda_min = s.min_eigenvalue()?;
     let dual_objective: f64 = y.iter().sum();
     Ok((y.len() as f64).mul_add((-lambda_min).max(0.0), -dual_objective))
+}
+
+/// The dual `y` at which `X = VᵀV` meets the Max-Cut SDP's optimality
+/// condition `(C − Diag(y)) X = 0`: `yᵢ = (C X)ᵢᵢ`, for `C = −L/4` and the
+/// unit columns `vᵢ` of `vectors`, so `yᵢ = Σⱼ (wᵢⱼ/4)(⟨vᵢ, vⱼ⟩ − 1)`.
+fn dual_from_vectors(graph: &Graph, vectors: &DenseMatrix) -> Vec<f64> {
+    let rank = vectors.rows();
+    let mut y = vec![0.0; graph.num_vertices()];
+    for &(u, v, w) in graph.edges() {
+        let inner = dot(col(vectors.data(), u, rank), col(vectors.data(), v, rank));
+        let term = 0.25 * w * (inner - 1.0);
+        y[u] += term;
+        y[v] += term;
+    }
+    y
+}
+
+/// The bound BM's best `vectors`, of relaxation value `relaxation`, give:
+/// certified from their dual up to [`MAX_CERTIFIED_VERTICES`], the
+/// relaxation value past it.
+fn bm_bound(graph: &Graph, relaxation: f64, vectors: &DenseMatrix) -> Result<SdpBound, GwError> {
+    if graph.num_vertices() > MAX_CERTIFIED_VERTICES {
+        return Ok(SdpBound::Relaxation(relaxation));
+    }
+    let y = dual_from_vectors(graph, vectors);
+    let mut cost = graph.laplacian();
+    cost.scale_assign(-0.25);
+    Ok(SdpBound::Certified(certified_bound(cost, &y)?))
 }
 
 /// Whether a step expected to take `expected`, started at `now`, finishes by
@@ -177,7 +239,7 @@ pub fn gw_maxcut(graph: &Graph, config: &GwConfig) -> Result<MaxCutResult, GwErr
 
     // The Max-Cut SDP maximizes (1/4) tr(LX) = -tr(CX). The converged dual
     // is feasible only to within the tolerance, so its objective is certified.
-    let sdp_bound = certified_bound(&problem.c, &solution.y)?;
+    let sdp_bound = SdpBound::Certified(certified_bound(problem.c, &solution.y)?);
 
     // 3. Round with random hyperplanes.
     let mut rng = config
@@ -190,7 +252,7 @@ pub fn gw_maxcut(graph: &Graph, config: &GwConfig) -> Result<MaxCutResult, GwErr
         rounding: config.rounding,
     };
     let best = rounding::multi_round(&solution.x, graph, plan, &mut rng)?;
-    let ratio = cut_ratio(best.cut_value, sdp_bound, graph.total_abs_weight());
+    let ratio = sdp_bound.ratio(best.cut_value, graph.total_abs_weight());
 
     Ok(MaxCutResult {
         partition: best.partition,
@@ -231,7 +293,7 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
     let start = Instant::now();
     let mut best_cut = f64::NEG_INFINITY;
     let mut best_partition: Vec<bool> = Vec::new();
-    let mut best_sdp_bound = f64::NEG_INFINITY;
+    let mut best_relaxation: Option<(f64, DenseMatrix)> = None;
     let mut total_trials = 0_usize;
 
     // Collect top partitions from all restarts for the refinement pool.
@@ -252,10 +314,7 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
             None
         };
         let solution = solver.solve_maxcut_with_context(graph, &mut rng, ctx)?;
-        let sdp_bound = -solution.objective;
-        if sdp_bound > best_sdp_bound {
-            best_sdp_bound = sdp_bound;
-        }
+        let relaxation = -solution.objective;
 
         let plan = TrialPlan {
             trials: config.num_trials,
@@ -273,12 +332,28 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
         }
 
         eprintln!(
-            "Restart {}/{num_restarts}: SDP={sdp_bound:.4}, cut={:.0}, best={best_cut:.0} ({:.1?})",
+            "Restart {}/{num_restarts}: relaxation={relaxation:.4}, cut={:.0}, best={best_cut:.0} ({:.1?})",
             restart + 1,
             result.cut_value,
             start.elapsed()
         );
+        if best_relaxation
+            .as_ref()
+            .is_none_or(|(best, _)| relaxation > *best)
+        {
+            best_relaxation = Some((relaxation, solution.vectors));
+        }
         last_restart = restart_start.elapsed();
+    }
+
+    let Some((relaxation, vectors)) = best_relaxation else {
+        return Err(GwError::SolverFailed(
+            "BM solver produced no solution".into(),
+        ));
+    };
+    let sdp_bound = bm_bound(graph, relaxation, &vectors)?;
+    if let SdpBound::Certified(bound) = sdp_bound {
+        eprintln!("Certified bound: {bound:.4} ({:.1?})", start.elapsed());
     }
 
     // Refinement phase: if a time budget is set and time remains, maintain a
@@ -346,18 +421,12 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
         }
     }
 
-    if best_partition.is_empty() {
-        return Err(GwError::SolverFailed(
-            "BM solver produced no solution".into(),
-        ));
-    }
-
-    let ratio = cut_ratio(best_cut, best_sdp_bound, graph.total_abs_weight());
+    let ratio = sdp_bound.ratio(best_cut, graph.total_abs_weight());
 
     Ok(MaxCutResult {
         partition: best_partition,
         cut_value: best_cut,
-        sdp_bound: best_sdp_bound,
+        sdp_bound,
         approximation_ratio: ratio,
         num_trials: total_trials,
     })
@@ -397,7 +466,7 @@ mod tests {
         let cost = graph.laplacian().scale(-0.25);
         let lambda_max = -cost.min_eigenvalue().unwrap_or_else(|e| panic!("{e}"));
 
-        let bound = certified_bound(&cost, &[0.0; 5]);
+        let bound = certified_bound(cost, &[0.0; 5]);
 
         let bound = bound.unwrap_or_else(|e| panic!("{e}"));
         assert!(
@@ -415,7 +484,7 @@ mod tests {
             .solve(&problem)
             .unwrap_or_else(|e| panic!("{e}"));
 
-        let bound = certified_bound(&problem.c, &solution.y).unwrap_or_else(|e| panic!("{e}"));
+        let bound = certified_bound(problem.c, &solution.y).unwrap_or_else(|e| panic!("{e}"));
 
         assert!(
             bound >= 4.0,

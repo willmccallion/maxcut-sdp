@@ -33,7 +33,7 @@ time_budget() {
     fi
 }
 
-echo "graph,nodes,edges,solver,time_s,sdp_bound,cut_value,best_known,gap_pct"
+echo "graph,nodes,edges,solver,time_s,sdp_value,sdp_certified,cut_value,best_known,gap_pct"
 
 for f in scripts/graphs/gset/G{1,11,14,22,35,43,48,55,58,60,63,67,70,77,81}.txt; do
     if [ ! -f "$f" ]; then
@@ -51,7 +51,8 @@ for f in scripts/graphs/gset/G{1,11,14,22,35,43,48,55,58,60,63,67,70,77,81}.txt;
     output=$($BIN "$f" --solver bm --seed 42 $budget 2>&1)
 
     m=$(echo "$output" | grep "^Graph:" | sed 's/.*, \([0-9]*\) edges.*/\1/')
-    sdp=$(echo "$output" | grep "SDP bound:" | awk '{print $3}')
+    sdp=$(echo "$output" | grep -E "^SDP (bound|relaxation):" | awk '{print $3}')
+    if echo "$output" | grep -q "^SDP bound:"; then certified=yes; else certified=no; fi
     cut=$(echo "$output" | grep "GW cut value:" | awk '{print $4}')
     time_str=$(echo "$output" | grep "Total time:" | awk '{print $3}')
 
@@ -65,6 +66,6 @@ for f in scripts/graphs/gset/G{1,11,14,22,35,43,48,55,58,60,63,67,70,77,81}.txt;
     # Gap to best known (%).
     gap=$(awk "BEGIN { printf \"%.2f\", 100 * (1 - ${cut%.000000} / $bk) }")
 
-    echo "${name},${n},${m},bm,${time_s},${sdp},${cut},${bk},${gap}"
+    echo "${name},${n},${m},bm,${time_s},${sdp},${certified},${cut},${bk},${gap}"
     >&2 echo "  cut=${cut} best_known=${bk} gap=${gap}% time=${time_s}s"
 done

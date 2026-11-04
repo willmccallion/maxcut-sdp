@@ -11,7 +11,10 @@ use clap::Parser;
 use maxcut_sdp::GwError;
 use maxcut_sdp::maxcut::exact::exact_maxcut;
 use maxcut_sdp::maxcut::rounding::{RotationAngle, Rounding};
-use maxcut_sdp::maxcut::{GwBmConfig, GwConfig, cut_ratio, gw_maxcut, gw_maxcut_bm};
+use maxcut_sdp::maxcut::{
+    GwBmConfig, GwConfig, MAX_CERTIFIED_VERTICES, MaxCutResult, SdpBound, cut_ratio, gw_maxcut,
+    gw_maxcut_bm,
+};
 use maxcut_sdp::parser::{parse_auto, parse_biqmac, parse_dimacs};
 use maxcut_sdp::sdp::solver::SolverConfig;
 use maxcut_sdp::sdp::solver_bm::BmSolverConfig;
@@ -167,12 +170,9 @@ fn run(cli: &Cli) -> Result<(), GwError> {
     }
 
     println!("\n--- Goemans-Williamson Result ---");
-    println!("SDP bound:      {:.6}", result.sdp_bound);
+    println!("{}", describe_bound(result.sdp_bound));
     println!("GW cut value:   {:.6} (verified)", result.cut_value);
-    println!(
-        "Approx ratio:   {}",
-        format_ratio(result.approximation_ratio)
-    );
+    println!("Approx ratio:   {}", describe_ratio(&result));
     println!("Rounding trials: {}", result.num_trials);
     println!("Total time:     {elapsed:.3?}");
 
@@ -206,6 +206,24 @@ fn run(cli: &Cli) -> Result<(), GwError> {
     }
 
     Ok(())
+}
+
+/// The SDP bound's report line, saying whether it is certified.
+fn describe_bound(bound: SdpBound) -> String {
+    match bound {
+        SdpBound::Certified(bound) => format!("SDP bound:      {bound:.6} (certified)"),
+        SdpBound::Relaxation(value) => format!(
+            "SDP relaxation: {value:.6} (not a bound; BM certifies up to {MAX_CERTIFIED_VERTICES} vertices)"
+        ),
+    }
+}
+
+/// The approximation ratio, or why there is none.
+fn describe_ratio(result: &MaxCutResult) -> String {
+    match result.sdp_bound {
+        SdpBound::Certified(_) => format_ratio(result.approximation_ratio),
+        SdpBound::Relaxation(_) => "none without a certified bound".to_string(),
+    }
 }
 
 /// A ratio to six places, or why there is none.

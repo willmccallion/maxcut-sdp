@@ -1,7 +1,7 @@
 //! Reproducibility of seeded Burer-Monteiro runs.
 
 use maxcut_sdp::graph::Graph;
-use maxcut_sdp::maxcut::{GwBmConfig, gw_maxcut_bm};
+use maxcut_sdp::maxcut::{GwBmConfig, SdpBound, gw_maxcut_bm};
 use maxcut_sdp::sdp::solver_bm::{BmSolver, BmSolverConfig};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -68,7 +68,7 @@ fn same_seed_gives_bitwise_identical_bm_relaxation() {
     );
 }
 
-fn seeded_bm_runs(graph: &Graph, config: &GwBmConfig) -> Vec<(Vec<bool>, f64, f64)> {
+fn seeded_bm_runs(graph: &Graph, config: &GwBmConfig) -> Vec<(Vec<bool>, f64, SdpBound)> {
     (0..RUNS)
         .map(|_| {
             let Ok(r) = gw_maxcut_bm(graph, config) else {
@@ -115,7 +115,7 @@ fn same_seed_gives_bitwise_identical_bm_bound() {
 
     let runs = seeded_bm_runs(&graph, &config);
 
-    let bounds: Vec<f64> = runs.iter().map(|run| run.2).collect();
+    let bounds: Vec<f64> = runs.iter().map(|run| run.2.value()).collect();
     assert!(
         bounds.iter().all(|b| b.to_bits() == bounds[0].to_bits()),
         "sdp_bound per run: {bounds:?}"

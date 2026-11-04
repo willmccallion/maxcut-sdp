@@ -37,7 +37,6 @@ with open(csv_path) as f:
         r["nodes"] = int(r["nodes"])
         r["edges"] = int(r["edges"])
         r["time_s"] = float(r["time_s"])
-        r["sdp_bound"] = float(r["sdp_bound"])
         r["cut_value"] = float(r["cut_value"])
         r["best_known"] = int(r["best_known"])
         r["gap_pct"] = float(r["gap_pct"])
