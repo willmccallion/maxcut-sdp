@@ -389,7 +389,7 @@ section of this document where it appears.
 | Matrix multiply $AB$ | §3.3 (forming $WAW$), §3.4 | $O(n^3)$ naive, can optimize later |
 | Trace inner product $\langle A, B \rangle = \text{tr}(A^\top B)$ | §3.4 (Schur entries) | $O(n^2)$, just sum element products |
 | Eigendecomposition $A = Q \Lambda Q^\top$ | §3.3 (NT scaling), §3.5 (step size) | Symmetric matrices only; Jacobi or QR |
-| Minimum eigenvalue $\lambda_{\min}(A)$ | §3.5 (step size) | Can use inverse power iteration |
+| Minimum eigenvalue $\lambda_{\min}(A)$ | §3.5 (step size), bound certificates | Householder tridiagonalization, then Sturm-sequence bisection |
 | Log-determinant $\ln \det(A) = 2 \sum_i \ln L_{ii}$ | §3.1 (barrier) | Via Cholesky diagonal |
 | Matrix inverse $A^{-1}$ | §3.4 (computing $S^{-1}$) | Via Cholesky: solve $L L^\top X = I$ |
 | Symmetric matrix square root $A^{1/2}$ | §3.3 (NT scaling) | Via eigendecomposition: $Q \Lambda^{1/2} Q^\top$ |

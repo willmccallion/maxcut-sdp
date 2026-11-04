@@ -11,12 +11,14 @@
 //!
 //! All operations are tuned for cache efficiency on column-major layout.
 //! Matrix multiply uses a blocked (tiled) algorithm to keep working sets in L1.
-//! Eigendecomposition uses the Jacobi method with threshold sweeps.
+//! Eigendecomposition uses the Jacobi method with threshold sweeps; the
+//! smallest eigenvalue alone, by Householder tridiagonalization and bisection.
 //!
 //! See [`MATH.md`](./MATH.md) §6 for the full list of operations and where
 //! each is used in the solver.
 
 use crate::GwError;
+use rayon::prelude::*;
 
 /// Block size for tiled matrix multiply. 64 × 64 f64 blocks = 32 KiB,
 /// fits comfortably in a 48 KiB L1d cache with room for two source tiles.
@@ -766,16 +768,47 @@ impl DenseMatrix {
 
     /// Computes the minimum eigenvalue of a symmetric matrix.
     ///
-    /// Used for step size selection (see [`MATH.md`](./MATH.md) §3.5).
+    /// Reduces the matrix to tridiagonal form and bisects on its inertia,
+    /// which takes `O(n³)` flops like Jacobi but with a far smaller constant.
+    /// Used for step size selection (see [`MATH.md`](./MATH.md) §3.5) and to
+    /// certify SDP bounds.
     ///
     /// # Errors
     ///
-    /// Returns [`GwError::InvalidMatrix`] if the matrix is not square.
+    /// Returns [`GwError::InvalidMatrix`] if the matrix is empty, not square,
+    /// or has a non-finite entry.
     pub fn min_eigenvalue(&self) -> Result<f64, GwError> {
-        let vals = self.eigenvalues_symmetric()?;
-        vals.into_iter()
-            .reduce(f64::min)
-            .ok_or_else(|| GwError::InvalidMatrix("empty matrix".to_string()))
+        if self.rows != self.cols {
+            return Err(GwError::InvalidMatrix(format!(
+                "minimum eigenvalue requires square matrix, got {}x{}",
+                self.rows, self.cols
+            )));
+        }
+        if self.rows == 0 {
+            return Err(GwError::InvalidMatrix("empty matrix".to_string()));
+        }
+        if !self.data.iter().all(|x| x.is_finite()) {
+            return Err(GwError::InvalidMatrix(
+                "minimum eigenvalue of a matrix with a non-finite entry".to_string(),
+            ));
+        }
+        let largest = self.data.iter().fold(0.0_f64, |m, x| m.max(x.abs()));
+        if largest == 0.0 {
+            return Ok(0.0);
+        }
+        // Normalizing by a power of two is exact and keeps squares from
+        // underflowing or overflowing during the reduction.
+        let exponent = largest.log2().floor() as i32;
+        let normalized = self
+            .data
+            .iter()
+            .map(|&x| scale_by_power_of_two(x, -exponent))
+            .collect();
+        let tridiagonal = Tridiagonal::reduce(normalized, self.rows);
+        Ok(scale_by_power_of_two(
+            tridiagonal.min_eigenvalue(),
+            exponent,
+        ))
     }
 
     /// Applies a scalar function `f` to the eigenvalues: `Q diag(f(λ_i)) Q^T`.
@@ -871,6 +904,161 @@ impl DenseMatrix {
             let clamped = lam.max(floor);
             Ok(1.0 / clamped)
         })
+    }
+}
+
+/// A symmetric tridiagonal matrix, held as its diagonal and the squares of
+/// the entries beside it, which are all its eigenvalues depend on.
+struct Tridiagonal {
+    diagonal: Vec<f64>,
+    /// `squared_offdiagonal[i]` is `T[i + 1][i]²`.
+    squared_offdiagonal: Vec<f64>,
+    /// The smallest magnitude a pivot of `T − xI` is allowed, so a zero pivot
+    /// counts as negative instead of dividing by zero.
+    min_pivot: f64,
+}
+
+impl Tridiagonal {
+    /// Reduces the symmetric `n × n` column-major matrix `a` to a
+    /// tridiagonal one with the same eigenvalues, applying a Householder
+    /// reflection `H A H` per column.
+    fn reduce(mut a: Vec<f64>, n: usize) -> Self {
+        let mut reflector = vec![0.0; n];
+        let mut update = vec![0.0; n];
+        let mut offdiagonal = Vec::with_capacity(n.saturating_sub(1));
+        for k in 0..n.saturating_sub(1) {
+            let below = &col(&a, k, n)[k + 1..];
+            let v = &mut reflector[k + 1..];
+            match Reflection::mapping(below, v) {
+                Some((alpha, reflection)) => {
+                    reflection.apply_to_trailing_block(
+                        &mut a[(k + 1) * n..],
+                        n,
+                        &mut update[k + 1..],
+                    );
+                    offdiagonal.push(alpha);
+                }
+                None => offdiagonal.push(below[0]),
+            }
+        }
+        let diagonal = (0..n).map(|i| a[idx(i, i, n)]).collect();
+        let squared_offdiagonal: Vec<f64> = offdiagonal.iter().map(|e| e * e).collect();
+        let largest = squared_offdiagonal.iter().copied().fold(1.0, f64::max);
+        Self {
+            diagonal,
+            squared_offdiagonal,
+            min_pivot: f64::MIN_POSITIVE * largest,
+        }
+    }
+
+    /// How many eigenvalues lie below `x`: by Sylvester's law of inertia, the
+    /// number of negative pivots in the `LDLᵀ` factorization of `T − xI`.
+    fn count_below(&self, x: f64) -> usize {
+        let mut negatives = 0;
+        let mut pivot = 1.0;
+        for (i, &d) in self.diagonal.iter().enumerate() {
+            let coupling = if i == 0 {
+                0.0
+            } else {
+                self.squared_offdiagonal[i - 1] / pivot
+            };
+            pivot = d - x - coupling;
+            if pivot.abs() < self.min_pivot {
+                pivot = -self.min_pivot;
+            }
+            if pivot < 0.0 {
+                negatives += 1;
+            }
+        }
+        negatives
+    }
+
+    /// The smallest eigenvalue, bisected to the last bit from a Gershgorin
+    /// lower bound and the smallest diagonal entry, which bound it below and
+    /// above.
+    fn min_eigenvalue(&self) -> f64 {
+        let n = self.diagonal.len();
+        let radius = |i: usize| {
+            let left = if i == 0 {
+                0.0
+            } else {
+                self.squared_offdiagonal[i - 1].sqrt()
+            };
+            let right = if i + 1 == n {
+                0.0
+            } else {
+                self.squared_offdiagonal[i].sqrt()
+            };
+            left + right
+        };
+        let mut lower = (0..n)
+            .map(|i| self.diagonal[i] - radius(i))
+            .fold(f64::INFINITY, f64::min);
+        let mut upper = self.diagonal.iter().copied().fold(f64::INFINITY, f64::min);
+        loop {
+            let mid = f64::midpoint(lower, upper);
+            if mid <= lower || mid >= upper {
+                return lower;
+            }
+            if self.count_below(mid) > 0 {
+                upper = mid;
+            } else {
+                lower = mid;
+            }
+        }
+    }
+}
+
+/// `x · 2^exponent`, exact unless the result leaves `f64`'s range, for any
+/// exponent a subnormal's normalization needs.
+fn scale_by_power_of_two(x: f64, exponent: i32) -> f64 {
+    let half = exponent / 2;
+    x * 2.0_f64.powi(half) * 2.0_f64.powi(exponent - half)
+}
+
+/// A Householder reflection `H = I − beta·v vᵀ` acting on the last
+/// `v.len()` coordinates.
+struct Reflection<'a> {
+    v: &'a [f64],
+    beta: f64,
+}
+
+impl<'a> Reflection<'a> {
+    /// The reflection, its vector written into `v`, that maps `x` onto
+    /// `alpha·e₁`, with that `alpha`; `None` when `x` already is a multiple
+    /// of `e₁`.
+    fn mapping(x: &[f64], v: &'a mut [f64]) -> Option<(f64, Self)> {
+        let tail_squared: f64 = x[1..].iter().map(|xi| xi * xi).sum();
+        if tail_squared == 0.0 {
+            return None;
+        }
+        let norm = x[0].mul_add(x[0], tail_squared).sqrt();
+        let alpha = -norm.copysign(x[0]);
+        v.copy_from_slice(x);
+        v[0] -= alpha;
+        let beta = 2.0 / v[0].mul_add(v[0], tail_squared);
+        Some((alpha, Self { v, beta }))
+    }
+
+    /// Replaces the trailing block of the `n`-row columns in `block` by
+    /// `H A H`: with `p = beta·A v` and `w = p − (beta·pᵀv / 2)·v`, that is
+    /// `A − v wᵀ − w vᵀ`. `w` is scratch space of `v`'s length.
+    fn apply_to_trailing_block(&self, block: &mut [f64], n: usize, w: &mut [f64]) {
+        let first = n - self.v.len();
+        w.par_iter_mut()
+            .zip(block.par_chunks(n))
+            .for_each(|(wj, column)| *wj = self.beta * dot(&column[first..], self.v));
+        let correction = 0.5 * self.beta * dot(w, self.v);
+        axpy(-correction, self.v, w);
+        let w = &*w;
+        block
+            .par_chunks_mut(n)
+            .zip(self.v.par_iter().zip(w.par_iter()))
+            .for_each(|(column, (&vj, &wj))| {
+                let column = &mut column[first..];
+                axpy(-wj, self.v, column);
+                axpy(-vj, w, column);
+            });
     }
 }
 
