@@ -10,7 +10,7 @@ This project implements the entire pipeline from scratch — no CVXPY, no MOSEK,
 
 - **Dense linear algebra**: Cholesky factorization, eigendecomposition, matrix square roots
 - **Primal-dual interior point method**: Nesterov-Todd scaling, Schur complement system, log-det barrier
-- **Burer-Monteiro low-rank solver**: nonlinear CG on the factored form $X = RR^T$, scalable to 14,000+ nodes
+- **Burer-Monteiro low-rank solver**: nonlinear CG on the factored form $X = RR^T$, scalable to 20,000 nodes
 - **GW rounding pipeline**: random hyperplane rounding or Zwick's outward rotations, one-flip local search, iterated local search with variable perturbation, parallel population-based refinement
 
 ## The Math
@@ -23,7 +23,7 @@ Full mathematical derivations are in the `MATH.md` files:
 
 ## Gset Benchmarks
 
-Tested on the [Gset benchmark suite](https://web.stanford.edu/~yyye/yyye/Gset/) (800–14,000 nodes). All cut values are independently verified. Best-known values are from BLS, MCPG, CirCut, and recent literature.
+Tested on the [Gset benchmark suite](https://web.stanford.edu/~yyye/yyye/Gset/) (800–20,000 nodes). All cut values are independently verified. Best-known values are from BLS, MCPG, CirCut, and recent literature.
 
 | Instance | Nodes | Edges | Best Known | maxcut-sdp | Gap | Time |
 |----------|------:|------:|-----------:|----------:|----:|-----:|
@@ -88,7 +88,7 @@ cargo build --release
 ./target/release/maxcut-sdp graph.txt --solver ipm --exact
 
 # Reproduce benchmarks
-./scripts/benchmark.sh > results/gset.csv
+mkdir -p results && ./scripts/benchmark.sh > results/gset.csv
 ```
 
 ### CLI Options
@@ -103,7 +103,10 @@ cargo build --release
 | `--restarts` | 3 | BM random restarts |
 | `--rank` | auto | BM factorization rank (default: $\lceil\sqrt{2n}\rceil$) |
 | `--seed` | random | RNG seed for reproducibility |
+| `--epsilon` | 1e-8 | IPM tolerance on the relative duality gap and infeasibilities (`--solver ipm` only) |
 | `--exact` | off | Also compute brute-force optimal (small graphs) |
+
+The reported SDP bound is certified: a dual solution proves no cut exceeds it, even when the solver stopped short of the SDP's optimum. BM certifies graphs of up to 3,000 vertices; past that the dense eigenvalue the certificate needs is too slow, so it prints its relaxation value, which is not a bound, and no approximation ratio.
 
 Outward rotations did not raise the final cut on the Biq Mac instances or on random graphs of up to 5,000 nodes: with the default 50 ILS rounds no angle from 0.1 to 0.5 improved any of them, and larger angles lost up to 0.5% on the biggest graphs. Iterated local search already closes the gap they target, so hyperplane rounding stays the default.
 

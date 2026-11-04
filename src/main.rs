@@ -30,7 +30,7 @@ struct Cli {
     #[arg(long, default_value_t = maxcut_sdp::maxcut::DEFAULT_TRIALS)]
     trials: NonZeroUsize,
 
-    /// IPM convergence tolerance on the duality gap (IPM only).
+    /// IPM tolerance on the relative duality gap and infeasibilities (IPM only).
     #[arg(long, default_value_t = 1e-8)]
     epsilon: f64,
 
