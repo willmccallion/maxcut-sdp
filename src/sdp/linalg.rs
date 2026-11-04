@@ -22,11 +22,13 @@ use crate::GwError;
 /// fits comfortably in a 48 KiB L1d cache with room for two source tiles.
 const BLOCK: usize = 64;
 
-/// Maximum Jacobi eigendecomposition sweeps before we declare convergence.
+/// Jacobi sweeps after which an eigendecomposition that has not converged
+/// is reported as failed.
 const MAX_JACOBI_SWEEPS: usize = 100;
 
-/// Convergence threshold for off-diagonal norm in Jacobi sweeps.
-const JACOBI_TOL: f64 = 1e-14;
+/// Off-diagonal Frobenius norm, relative to the whole matrix's, at which
+/// Jacobi sweeps have converged; relative so any scale is solved alike.
+const JACOBI_REL_TOL: f64 = 1e-14;
 
 /// A dense matrix stored in **column-major** order.
 ///
@@ -582,7 +584,9 @@ impl DenseMatrix {
     ///
     /// # Errors
     ///
-    /// Returns [`GwError::InvalidMatrix`] if the matrix is not square.
+    /// Returns [`GwError::InvalidMatrix`] if the matrix is not square or has
+    /// a non-finite entry, and [`GwError::SolverFailed`] if the sweeps do not
+    /// converge.
     pub fn eigendecomposition_symmetric(&self) -> Result<(Vec<f64>, Self), GwError> {
         let n = self.rows;
         if n != self.cols {
@@ -598,12 +602,20 @@ impl DenseMatrix {
             return Ok((vec![self.data[0]], Self::identity(1)));
         }
 
+        if !self.data.iter().all(|x| x.is_finite()) {
+            return Err(GwError::InvalidMatrix(
+                "eigendecomposition of a matrix with a non-finite entry".to_string(),
+            ));
+        }
+
         // Work on a copy that we'll diagonalize in-place.
         let mut a = self.data.clone();
         // Q accumulates rotations, starts as identity.
         let mut q = Self::identity(n);
+        // Rotations preserve the Frobenius norm, so this is the scale throughout.
+        let tolerance = JACOBI_REL_TOL * self.data.iter().map(|x| x * x).sum::<f64>().sqrt();
 
-        for sweep in 0..MAX_JACOBI_SWEEPS {
+        for sweep in 0..=MAX_JACOBI_SWEEPS {
             // Compute off-diagonal Frobenius norm.
             let mut off_norm = 0.0_f64;
             for j in 0..n {
@@ -614,8 +626,13 @@ impl DenseMatrix {
             }
             off_norm = off_norm.sqrt();
 
-            if off_norm < JACOBI_TOL {
+            if off_norm <= tolerance {
                 break;
+            }
+            if sweep == MAX_JACOBI_SWEEPS {
+                return Err(GwError::SolverFailed(format!(
+                    "Jacobi eigendecomposition did not converge in {MAX_JACOBI_SWEEPS} sweeps"
+                )));
             }
 
             // Threshold: only rotate if |a_ij| > threshold. The threshold
@@ -717,7 +734,7 @@ impl DenseMatrix {
     ///
     /// # Errors
     ///
-    /// Returns [`GwError::InvalidMatrix`] if the matrix is not square.
+    /// As [`eigendecomposition_symmetric`](Self::eigendecomposition_symmetric).
     pub fn eigenvalues_symmetric(&self) -> Result<Vec<f64>, GwError> {
         let (vals, _) = self.eigendecomposition_symmetric()?;
         Ok(vals)
