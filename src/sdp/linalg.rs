@@ -32,6 +32,17 @@ const MAX_JACOBI_SWEEPS: usize = 100;
 /// Jacobi sweeps have converged; relative so any scale is solved alike.
 const JACOBI_REL_TOL: f64 = 1e-14;
 
+/// Opening Jacobi sweeps that skip entries small against the off-diagonal
+/// norm; later sweeps rotate every nonzero entry.
+const THRESHOLD_SWEEPS: usize = 3;
+
+/// An opening sweep skips entries below this fraction of the off-diagonal
+/// norm divided by `n`.
+const THRESHOLD_FACTOR: f64 = 0.2;
+
+/// Diagonal entries closer than this rotate by `π/4`, as if equal.
+const EQUAL_DIAGONAL_GAP: f64 = 1e-300;
+
 /// A dense matrix stored in **column-major** order.
 ///
 /// Element `(i, j)` is stored at index `i + j * rows` in the backing `Vec<f64>`.
@@ -473,123 +484,11 @@ impl DenseMatrix {
 
         self.ensure_finite("eigendecomposition")?;
 
-        // Work on a copy that we'll diagonalize in-place.
-        let mut a = self.data.clone();
-        // Q accumulates rotations, starts as identity.
-        let mut q = Self::identity(n);
         // Rotations preserve the Frobenius norm, so this is the scale throughout.
         let tolerance = JACOBI_REL_TOL * self.data.iter().map(|x| x * x).sum::<f64>().sqrt();
-
-        for sweep in 0..=MAX_JACOBI_SWEEPS {
-            // Compute off-diagonal Frobenius norm.
-            let mut off_norm = 0.0_f64;
-            for j in 0..n {
-                for i in (j + 1)..n {
-                    let v = a[idx(i, j, n)];
-                    off_norm = (2.0 * v).mul_add(v, off_norm);
-                }
-            }
-            off_norm = off_norm.sqrt();
-
-            if off_norm <= tolerance {
-                break;
-            }
-            if sweep == MAX_JACOBI_SWEEPS {
-                return Err(GwError::SolverFailed(format!(
-                    "Jacobi eigendecomposition did not converge in {MAX_JACOBI_SWEEPS} sweeps"
-                )));
-            }
-
-            // Threshold: only rotate if |a_ij| > threshold. The threshold
-            // shrinks each sweep, giving quadratic convergence.
-            let threshold = if sweep < 3 {
-                0.2 * off_norm / (n as f64 * n as f64).sqrt()
-            } else {
-                0.0
-            };
-
-            // Cyclic-by-row sweep over all (i,j) pairs with i > j.
-            for j in 0..n {
-                for i in (j + 1)..n {
-                    let a_ij = a[idx(i, j, n)];
-                    if a_ij.abs() <= threshold {
-                        continue;
-                    }
-
-                    let a_ii = a[idx(i, i, n)];
-                    let a_jj = a[idx(j, j, n)];
-                    let diff = a_jj - a_ii;
-
-                    // Compute tan(θ) for the Givens rotation.
-                    let t = if diff.abs() < 1e-300 {
-                        // a_ii ≈ a_jj, use θ = π/4.
-                        if a_ij >= 0.0 { 1.0 } else { -1.0 }
-                    } else {
-                        let tau = diff / (2.0 * a_ij);
-                        // Smaller root of t^2 + 2τt - 1 = 0 (avoids cancellation).
-                        if tau >= 0.0 {
-                            1.0 / (tau + tau.mul_add(tau, 1.0).sqrt())
-                        } else {
-                            -1.0 / (-tau + tau.mul_add(tau, 1.0).sqrt())
-                        }
-                    };
-
-                    let cos = 1.0 / t.mul_add(t, 1.0).sqrt();
-                    let sin = t * cos;
-                    // Rotation parameter for reduced-multiplication formulas.
-                    let tau_rot = sin / (1.0 + cos);
-
-                    // Update diagonal elements.
-                    a[idx(i, i, n)] = t.mul_add(-a_ij, a[idx(i, i, n)]);
-                    a[idx(j, j, n)] = t.mul_add(a_ij, a[idx(j, j, n)]);
-                    a[idx(i, j, n)] = 0.0;
-                    a[idx(j, i, n)] = 0.0;
-
-                    // Rotate rows/cols k for k ≠ i, k ≠ j.
-                    for k in 0..n {
-                        if k == i || k == j {
-                            continue;
-                        }
-                        let a_ki = a[idx(k, i, n)];
-                        let a_kj = a[idx(k, j, n)];
-                        let new_ki = sin.mul_add(-tau_rot.mul_add(a_ki, a_kj), a_ki);
-                        let new_kj = sin.mul_add(tau_rot.mul_add(-a_kj, a_ki), a_kj);
-                        a[idx(k, i, n)] = new_ki;
-                        a[idx(i, k, n)] = new_ki;
-                        a[idx(k, j, n)] = new_kj;
-                        a[idx(j, k, n)] = new_kj;
-                    }
-
-                    // Accumulate rotation into Q columns i and j.
-                    let qd = &mut q.data;
-                    for k in 0..n {
-                        let qi_k = qd[idx(k, i, n)];
-                        let qj_k = qd[idx(k, j, n)];
-                        qd[idx(k, i, n)] = sin.mul_add(-tau_rot.mul_add(qi_k, qj_k), qi_k);
-                        qd[idx(k, j, n)] = sin.mul_add(tau_rot.mul_add(-qj_k, qi_k), qj_k);
-                    }
-                }
-            }
-        }
-
-        // Extract eigenvalues from the diagonal.
-        let mut eig_indices: Vec<usize> = (0..n).collect();
-        eig_indices.sort_by(|&i, &j| {
-            a[idx(i, i, n)]
-                .partial_cmp(&a[idx(j, j, n)])
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        let mut eigenvalues = Vec::with_capacity(n);
-        let mut q_sorted = Self::zeros(n, n);
-        for (new_col, &old_col) in eig_indices.iter().enumerate() {
-            eigenvalues.push(a[idx(old_col, old_col, n)]);
-            let src = col(&q.data, old_col, n);
-            let dst = col_mut(&mut q_sorted.data, new_col, n);
-            dst.copy_from_slice(src);
-        }
-
-        Ok((eigenvalues, q_sorted))
+        let mut jacobi = Jacobi::new(self);
+        jacobi.diagonalize(tolerance)?;
+        Ok(jacobi.sorted_eigenpairs())
     }
 
     /// Computes all eigenvalues of a symmetric matrix.
@@ -728,6 +627,161 @@ impl DenseMatrix {
         Err(GwError::InvalidMatrix(format!(
             "{operation} of a matrix with a non-finite entry"
         )))
+    }
+}
+
+/// A symmetric matrix being diagonalized by Jacobi rotations, with the
+/// rotations accumulated into `q`.
+struct Jacobi {
+    a: Vec<f64>,
+    q: DenseMatrix,
+    n: usize,
+}
+
+impl Jacobi {
+    fn new(matrix: &DenseMatrix) -> Self {
+        Self {
+            a: matrix.data.clone(),
+            q: DenseMatrix::identity(matrix.rows),
+            n: matrix.rows,
+        }
+    }
+
+    /// Sweeps until the off-diagonal norm is at most `tolerance`.
+    fn diagonalize(&mut self, tolerance: f64) -> Result<(), GwError> {
+        for sweep in 0..MAX_JACOBI_SWEEPS {
+            let off_norm = self.off_diagonal_norm();
+            if off_norm <= tolerance {
+                return Ok(());
+            }
+            self.sweep(rotation_threshold(sweep, off_norm, self.n));
+        }
+        if self.off_diagonal_norm() <= tolerance {
+            return Ok(());
+        }
+        Err(GwError::SolverFailed(format!(
+            "Jacobi eigendecomposition did not converge in {MAX_JACOBI_SWEEPS} sweeps"
+        )))
+    }
+
+    fn off_diagonal_norm(&self) -> f64 {
+        let n = self.n;
+        let mut norm_sq = 0.0_f64;
+        for j in 0..n {
+            for i in (j + 1)..n {
+                let v = self.a[idx(i, j, n)];
+                norm_sq = (2.0 * v).mul_add(v, norm_sq);
+            }
+        }
+        norm_sq.sqrt()
+    }
+
+    /// One cyclic-by-row sweep, rotating away every entry above `threshold`.
+    fn sweep(&mut self, threshold: f64) {
+        let n = self.n;
+        for j in 0..n {
+            for i in (j + 1)..n {
+                let a_ij = self.a[idx(i, j, n)];
+                if a_ij.abs() > threshold {
+                    let rotation = JacobiRotation::annihilating(
+                        self.a[idx(i, i, n)],
+                        self.a[idx(j, j, n)],
+                        a_ij,
+                    );
+                    self.rotate(i, j, &rotation, a_ij);
+                }
+            }
+        }
+    }
+
+    /// Applies `rotation`, which zeroes `a_ij`, to `a` and accumulates it into `q`.
+    fn rotate(&mut self, i: usize, j: usize, rotation: &JacobiRotation, a_ij: f64) {
+        let n = self.n;
+        let a = &mut self.a;
+        a[idx(i, i, n)] = rotation.t.mul_add(-a_ij, a[idx(i, i, n)]);
+        a[idx(j, j, n)] = rotation.t.mul_add(a_ij, a[idx(j, j, n)]);
+        a[idx(i, j, n)] = 0.0;
+        a[idx(j, i, n)] = 0.0;
+        for k in (0..n).filter(|&k| k != i && k != j) {
+            let (new_ki, new_kj) = rotation.apply(a[idx(k, i, n)], a[idx(k, j, n)]);
+            a[idx(k, i, n)] = new_ki;
+            a[idx(i, k, n)] = new_ki;
+            a[idx(k, j, n)] = new_kj;
+            a[idx(j, k, n)] = new_kj;
+        }
+        let q = &mut self.q.data;
+        for k in 0..n {
+            let (new_ki, new_kj) = rotation.apply(q[idx(k, i, n)], q[idx(k, j, n)]);
+            q[idx(k, i, n)] = new_ki;
+            q[idx(k, j, n)] = new_kj;
+        }
+    }
+
+    /// The diagonal's eigenvalues in ascending order, with `q`'s columns in
+    /// the same order.
+    fn sorted_eigenpairs(self) -> (Vec<f64>, DenseMatrix) {
+        let n = self.n;
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by(|&i, &j| self.a[idx(i, i, n)].total_cmp(&self.a[idx(j, j, n)]));
+
+        let mut eigenvalues = Vec::with_capacity(n);
+        let mut q_sorted = DenseMatrix::zeros(n, n);
+        for (new_col, &old_col) in order.iter().enumerate() {
+            eigenvalues.push(self.a[idx(old_col, old_col, n)]);
+            col_mut(&mut q_sorted.data, new_col, n).copy_from_slice(col(&self.q.data, old_col, n));
+        }
+        (eigenvalues, q_sorted)
+    }
+}
+
+/// The threshold below which `sweep` leaves an entry unrotated: a fraction
+/// of the off-diagonal norm in the opening sweeps, zero after them.
+fn rotation_threshold(sweep: usize, off_norm: f64, n: usize) -> f64 {
+    if sweep < THRESHOLD_SWEEPS {
+        THRESHOLD_FACTOR * off_norm / (n as f64 * n as f64).sqrt()
+    } else {
+        0.0
+    }
+}
+
+/// A Givens rotation by `θ`, held as `t = tan θ`, `sin θ` and
+/// `tau = sin θ / (1 + cos θ)` for the reduced-multiplication update.
+struct JacobiRotation {
+    t: f64,
+    sin: f64,
+    tau: f64,
+}
+
+impl JacobiRotation {
+    /// The rotation that zeroes `a_ij` between diagonal entries `a_ii` and `a_jj`.
+    fn annihilating(a_ii: f64, a_jj: f64, a_ij: f64) -> Self {
+        let diff = a_jj - a_ii;
+        let t = if diff.abs() < EQUAL_DIAGONAL_GAP {
+            if a_ij >= 0.0 { 1.0 } else { -1.0 }
+        } else {
+            let tau = diff / (2.0 * a_ij);
+            // The smaller root of t² + 2τt − 1 = 0, which avoids cancellation.
+            if tau >= 0.0 {
+                1.0 / (tau + tau.mul_add(tau, 1.0).sqrt())
+            } else {
+                -1.0 / (-tau + tau.mul_add(tau, 1.0).sqrt())
+            }
+        };
+        let cos = 1.0 / t.mul_add(t, 1.0).sqrt();
+        let sin = t * cos;
+        Self {
+            t,
+            sin,
+            tau: sin / (1.0 + cos),
+        }
+    }
+
+    /// The rotated pair `(x_i, x_j)` of entries in columns `i` and `j`.
+    fn apply(&self, x_i: f64, x_j: f64) -> (f64, f64) {
+        (
+            self.sin.mul_add(-self.tau.mul_add(x_i, x_j), x_i),
+            self.sin.mul_add(self.tau.mul_add(-x_j, x_i), x_j),
+        )
     }
 }
 
