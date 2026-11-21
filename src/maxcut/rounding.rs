@@ -101,7 +101,7 @@ const CHOLESKY_REGULARIZATION: f64 = 1e-10;
 /// # Errors
 ///
 /// Returns an error if even the regularized matrix fails Cholesky.
-pub fn extract_vectors(x: &DenseMatrix) -> Result<DenseMatrix, GwError> {
+pub(crate) fn extract_vectors(x: &DenseMatrix) -> Result<DenseMatrix, GwError> {
     // Try Cholesky directly first.
     if let Ok(l) = x.cholesky() {
         return Ok(l.transpose());
@@ -120,7 +120,7 @@ pub fn extract_vectors(x: &DenseMatrix) -> Result<DenseMatrix, GwError> {
 /// partition `sign(V^T r)` (i.e., `sign(⟨v_i, r⟩)`) as a boolean vector.
 ///
 /// See [`MATH.md`](../MATH.md) §4.
-pub fn random_hyperplane_round(vectors: &DenseMatrix, rng: &mut impl Rng) -> Vec<bool> {
+pub(crate) fn random_hyperplane_round(vectors: &DenseMatrix, rng: &mut impl Rng) -> Vec<bool> {
     let r = gaussian_vector(vectors.rows(), rng);
     projections(vectors, &r)
         .into_iter()
@@ -139,7 +139,7 @@ pub fn random_hyperplane_round(vectors: &DenseMatrix, rng: &mut impl Rng) -> Vec
 /// `θ = π/2` a uniformly random cut.
 ///
 /// See [`MATH.md`](../MATH.md) §4.
-pub fn outward_rotation_round(
+pub(crate) fn outward_rotation_round(
     vectors: &DenseMatrix,
     angle: RotationAngle,
     rng: &mut impl Rng,
@@ -173,7 +173,7 @@ fn projections(vectors: &DenseMatrix, r: &[f64]) -> Vec<f64> {
 /// For each vertex, if flipping it to the other side of the partition increases
 /// the cut value, flip it. Repeat until no single flip improves the cut.
 /// This typically improves cut values by 1-3% over raw hyperplane rounding.
-pub fn one_flip_local_search(partition: &mut [bool], graph: &Graph) -> f64 {
+pub(crate) fn one_flip_local_search(partition: &mut [bool], graph: &Graph) -> f64 {
     let n = graph.num_vertices();
     let mut improved = true;
     while improved {
@@ -201,7 +201,7 @@ pub fn one_flip_local_search(partition: &mut [bool], graph: &Graph) -> f64 {
 
 /// Rounds in one cycle of iterated local search's perturbation sizes: the
 /// largest comes once per cycle.
-pub const PERTURBATION_CYCLE_ROUNDS: usize = 20;
+pub(crate) const PERTURBATION_CYCLE_ROUNDS: usize = 20;
 
 /// Every this many rounds a medium perturbation replaces a small one.
 const MEDIUM_PERTURBATION_PERIOD: usize = 5;
@@ -240,7 +240,7 @@ fn perturb(partition: &mut [bool], count: usize, rng: &mut impl Rng) {
 /// perturb by flipping random vertices, repeat. Uses variable perturbation
 /// strength to escape deeper basins: n/100 vertices most rounds, n/10 every
 /// fifth round, and n/3 once per [`PERTURBATION_CYCLE_ROUNDS`].
-pub fn iterated_local_search(
+pub(crate) fn iterated_local_search(
     partition: &mut [bool],
     graph: &Graph,
     rounds: usize,
@@ -251,7 +251,7 @@ pub fn iterated_local_search(
 
 /// [`iterated_local_search`] that also stops starting rounds once
 /// `deadline` has passed. Returns the cut and the rounds it ran.
-pub fn iterated_local_search_until(
+pub(crate) fn iterated_local_search_until(
     partition: &mut [bool],
     graph: &Graph,
     rounds: usize,
@@ -292,7 +292,7 @@ pub fn iterated_local_search_until(
 /// run in parallel yet a seeded run is reproducible.
 ///
 /// See [`MATH.md`](../MATH.md) §7.
-pub fn round_trials(
+pub(crate) fn round_trials(
     vectors: &DenseMatrix,
     graph: &Graph,
     plan: TrialPlan,
@@ -318,7 +318,7 @@ pub fn round_trials(
 
 /// The `pool_size` best of `cuts`, best first, equal cuts in their order in
 /// `cuts`.
-pub fn best_cuts(mut cuts: Vec<Cut>, pool_size: usize) -> Vec<Cut> {
+pub(crate) fn best_cuts(mut cuts: Vec<Cut>, pool_size: usize) -> Vec<Cut> {
     cuts.sort_by(|a, b| b.cut_value.total_cmp(&a.cut_value));
     cuts.truncate(pool_size);
     cuts
@@ -330,7 +330,7 @@ pub fn best_cuts(mut cuts: Vec<Cut>, pool_size: usize) -> Vec<Cut> {
 /// # Errors
 ///
 /// Returns an error if vector extraction fails.
-pub fn multi_round(
+pub(crate) fn multi_round(
     x: &DenseMatrix,
     graph: &Graph,
     plan: TrialPlan,
