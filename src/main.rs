@@ -67,8 +67,8 @@ struct Cli {
     /// Time budget in seconds (BM only). Restarts after the first start only
     /// if they fit, and the time left refines the best cuts; the first
     /// restart always completes.
-    #[arg(long)]
-    time: Option<u64>,
+    #[arg(long = "time")]
+    time_limit_secs: Option<u64>,
 
     /// Round with Zwick's outward rotation by this angle, in radians within
     /// [0, π/2], instead of plain hyperplane rounding.
@@ -225,7 +225,7 @@ fn backend(cli: &Cli, kind: BackendKind) -> Backend {
                 ..BmSolverConfig::default()
             },
             num_restarts: cli.restarts,
-            time_limit: cli.time.map(Duration::from_secs),
+            time_limit: cli.time_limit_secs.map(Duration::from_secs),
         }),
     }
 }
