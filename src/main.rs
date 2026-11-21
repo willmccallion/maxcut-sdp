@@ -68,7 +68,7 @@ struct Cli {
     /// Time budget in seconds (BM only). Restarts after the first start only
     /// if they fit, and the time left refines the best cuts; the first
     /// restart always completes.
-    #[arg(long = "time")]
+    #[arg(long = "time", value_name = "SECONDS")]
     time_limit_secs: Option<u64>,
 
     /// Round with Zwick's outward rotation by this angle, in radians within
