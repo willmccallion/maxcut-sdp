@@ -83,7 +83,7 @@ graph TD
 ## Build & Run
 
 ```bash
-# Build
+# Build (.cargo/config.toml sets target-cpu=native, so the binary is tuned to this CPU and may not run on others)
 cargo build --release
 
 # Run on a graph file (auto-detects format)
