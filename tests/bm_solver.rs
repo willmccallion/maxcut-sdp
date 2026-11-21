@@ -1,38 +1,17 @@
 //! Integration tests for the Burer-Monteiro Max-Cut solver.
 
-use maxcut_sdp::graph::Graph;
+mod common;
+
+use common::{complete, cycle};
 use maxcut_sdp::maxcut::rounding::Rounding;
 use maxcut_sdp::maxcut::{GwBmConfig, GwConfig, gw_maxcut, gw_maxcut_bm};
 use maxcut_sdp::sdp::solver_bm::BmSolverConfig;
 use std::num::NonZeroUsize;
 
-/// Helper: build the 5-cycle `C_5` with unit weights (OPT = 4).
-fn five_cycle() -> Graph {
-    let mut g = Graph::new(5);
-    let _ = g.add_edge(0, 1, 1.0);
-    let _ = g.add_edge(1, 2, 1.0);
-    let _ = g.add_edge(2, 3, 1.0);
-    let _ = g.add_edge(3, 4, 1.0);
-    let _ = g.add_edge(4, 0, 1.0);
-    g
-}
-
-/// Helper: build `K_4` with unit weights (OPT = 4).
-fn k4() -> Graph {
-    let mut g = Graph::new(4);
-    let _ = g.add_edge(0, 1, 1.0);
-    let _ = g.add_edge(0, 2, 1.0);
-    let _ = g.add_edge(0, 3, 1.0);
-    let _ = g.add_edge(1, 2, 1.0);
-    let _ = g.add_edge(1, 3, 1.0);
-    let _ = g.add_edge(2, 3, 1.0);
-    g
-}
-
 /// Full GW pipeline with BM on C5: cut >= `α_GW` · OPT.
 #[test]
 fn bm_five_cycle_gw_guarantee() {
-    let g = five_cycle();
+    let g = cycle(5);
     let config = GwBmConfig {
         num_trials: NonZeroUsize::new(100).unwrap_or_else(|| panic!("100 trials")),
         ils_rounds: 5,
@@ -45,9 +24,7 @@ fn bm_five_cycle_gw_guarantee() {
         time_limit: None,
     };
 
-    let result = gw_maxcut_bm(&g, &config);
-    assert!(result.is_ok());
-    let result = result.unwrap_or_else(|_| panic!("gw_maxcut_bm failed"));
+    let result = gw_maxcut_bm(&g, &config).unwrap_or_else(|e| panic!("gw_maxcut_bm failed: {e}"));
 
     // GW guarantee: cut >= α_GW · OPT ≈ 0.878 · 4 ≈ 3.51.
     let alpha_gw: f64 = 0.878;
@@ -62,7 +39,7 @@ fn bm_five_cycle_gw_guarantee() {
 /// BM on K4: cut >= `α_GW` · 4.
 #[test]
 fn bm_k4_gw_guarantee() {
-    let g = k4();
+    let g = complete(4);
     let config = GwBmConfig {
         num_trials: NonZeroUsize::new(100).unwrap_or_else(|| panic!("100 trials")),
         ils_rounds: 5,
@@ -75,9 +52,7 @@ fn bm_k4_gw_guarantee() {
         time_limit: None,
     };
 
-    let result = gw_maxcut_bm(&g, &config);
-    assert!(result.is_ok());
-    let result = result.unwrap_or_else(|_| panic!("gw_maxcut_bm failed"));
+    let result = gw_maxcut_bm(&g, &config).unwrap_or_else(|e| panic!("gw_maxcut_bm failed: {e}"));
 
     let alpha_gw: f64 = 0.878;
     assert!(
@@ -91,7 +66,7 @@ fn bm_k4_gw_guarantee() {
 /// BM SDP bound should be close to IPM SDP bound on small graphs.
 #[test]
 fn bm_bound_close_to_ipm() {
-    let g = five_cycle();
+    let g = cycle(5);
 
     let ipm_config = GwConfig {
         num_trials: NonZeroUsize::new(10).unwrap_or_else(|| panic!("10 trials")),
@@ -125,7 +100,7 @@ fn bm_bound_close_to_ipm() {
 /// Rank override should work (use rank = n which is the maximum).
 #[test]
 fn bm_rank_override() {
-    let g = k4();
+    let g = complete(4);
     let config = GwBmConfig {
         num_trials: NonZeroUsize::new(50).unwrap_or_else(|| panic!("50 trials")),
         ils_rounds: 5,
@@ -138,9 +113,7 @@ fn bm_rank_override() {
         time_limit: None,
     };
 
-    let result = gw_maxcut_bm(&g, &config);
-    assert!(result.is_ok());
-    let result = result.unwrap_or_else(|_| panic!("gw_maxcut_bm failed"));
+    let result = gw_maxcut_bm(&g, &config).unwrap_or_else(|e| panic!("gw_maxcut_bm failed: {e}"));
 
     // Should still produce a valid cut.
     assert!(result.cut_value >= 3.0, "cut = {}", result.cut_value);

@@ -3,8 +3,10 @@
 //! Verifies Cholesky, eigendecomposition, and full SDP solves against
 //! analytically known solutions.
 
+mod common;
+
+use common::{cycle, triangle};
 use maxcut_sdp::GwError;
-use maxcut_sdp::graph::Graph;
 use maxcut_sdp::sdp::linalg::DenseMatrix;
 use maxcut_sdp::sdp::solver::{Solver, SolverConfig};
 use maxcut_sdp::sdp::{ConstraintMatrix, SdpProblem};
@@ -94,12 +96,7 @@ fn sdp_2x2_worked_example() {
 /// Max-Cut SDP on the triangle: `SDP_OPT` ≥ OPT = 2.
 #[test]
 fn maxcut_sdp_triangle() {
-    let mut g = Graph::new(3);
-    let _ = g.add_edge(0, 1, 1.0);
-    let _ = g.add_edge(1, 2, 1.0);
-    let _ = g.add_edge(0, 2, 1.0);
-
-    let problem = SdpProblem::maxcut_relaxation(&g);
+    let problem = SdpProblem::maxcut_relaxation(&triangle(1.0));
     assert!(problem.is_ok());
     let problem = problem.unwrap_or_else(|_| panic!("maxcut_relaxation failed"));
 
@@ -118,13 +115,7 @@ fn maxcut_sdp_triangle() {
 /// Verify primal feasibility of the Max-Cut SDP solution.
 #[test]
 fn maxcut_sdp_feasibility() {
-    let mut g = Graph::new(4);
-    let _ = g.add_edge(0, 1, 1.0);
-    let _ = g.add_edge(1, 2, 1.0);
-    let _ = g.add_edge(2, 3, 1.0);
-    let _ = g.add_edge(3, 0, 1.0);
-
-    let problem = SdpProblem::maxcut_relaxation(&g);
+    let problem = SdpProblem::maxcut_relaxation(&cycle(4));
     assert!(problem.is_ok());
     let problem = problem.unwrap_or_else(|_| panic!("maxcut_relaxation failed"));
 
@@ -147,19 +138,11 @@ fn maxcut_sdp_feasibility() {
     }
 }
 
-fn odd_cycle(n: usize) -> Graph {
-    let mut g = Graph::new(n);
-    for i in 0..n {
-        let _ = g.add_edge(i, (i + 1) % n, 1.0);
-    }
-    g
-}
-
 /// The Max-Cut SDP value of the odd cycle `C_n` is `(n/2)(1 + cos(π/n))`.
 #[test]
 fn ipm_reaches_the_sdp_value_of_a_61_cycle() {
     let n = 61;
-    let problem = SdpProblem::maxcut_relaxation(&odd_cycle(n))
+    let problem = SdpProblem::maxcut_relaxation(&cycle(n))
         .unwrap_or_else(|_| panic!("maxcut_relaxation failed"));
     let expected = (n as f64 / 2.0) * (1.0 + (std::f64::consts::PI / n as f64).cos());
 
@@ -176,7 +159,7 @@ fn ipm_reaches_the_sdp_value_of_a_61_cycle() {
 
 #[test]
 fn stopping_before_convergence_is_an_error() {
-    let problem = SdpProblem::maxcut_relaxation(&odd_cycle(5))
+    let problem = SdpProblem::maxcut_relaxation(&cycle(5))
         .unwrap_or_else(|_| panic!("maxcut_relaxation failed"));
     let solver = Solver::new(SolverConfig {
         max_iterations: 1,
