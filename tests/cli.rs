@@ -100,6 +100,21 @@ fn a_rank_past_the_vertex_count_is_refused() {
 }
 
 #[test]
+fn a_bm_flag_is_refused_when_the_ipm_runs() {
+    let output = run(
+        &cycle_file(5, "a_bm_flag_is_refused_when_the_ipm_runs"),
+        &["--time", "5"],
+    );
+
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("--time applies only"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
 fn a_rotation_past_a_right_angle_is_refused() {
     let output = run(
         &cycle_file(5, "a_rotation_past_a_right_angle_is_refused"),
