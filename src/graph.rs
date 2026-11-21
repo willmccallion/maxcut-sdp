@@ -5,7 +5,7 @@
 //! [`Graph::laplacian`] constructs the graph Laplacian matrix `L = D - W`
 //! needed for the Max-Cut SDP formulation.
 //!
-//! See [`maxcut/MATH.md`](../maxcut/MATH.md) §3 for the Laplacian definition.
+//! See [`maxcut/MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/maxcut/MATH.md) §3 for the Laplacian definition.
 
 use crate::GwError;
 use crate::sdp::linalg::DenseMatrix;
@@ -96,7 +96,7 @@ impl Graph {
     ///
     /// The Laplacian is symmetric positive semidefinite with `L·1 = 0`.
     ///
-    /// See [`maxcut/MATH.md`](../maxcut/MATH.md) §3 for details.
+    /// See [`maxcut/MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/maxcut/MATH.md) §3 for details.
     pub fn laplacian(&self) -> DenseMatrix {
         let n = self.n;
         let mut l = DenseMatrix::zeros(n, n);

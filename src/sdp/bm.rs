@@ -10,7 +10,7 @@
 //! optimum of that rank (Barvinok-Pataki), and for almost every cost matrix every
 //! second-order critical point is optimal (Boumal et al. 2016). The solver stops at an
 //! approximate first-order point, though, so its objective is no upper bound; the
-//! pipeline certifies one ([`MATH.md`](./MATH.md) §7.10).
+//! pipeline certifies one ([`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §7.10).
 //!
 //! Hot-path optimizations:
 //! - Objective uses dot-product identity: ‖vi−vj‖² = 2(1−⟨vi,vj⟩), reusing the
@@ -19,7 +19,7 @@
 //! - Gradient, tangent projection, and norm are fused into a single O(n·r) pass.
 //! - Edge column offsets are pre-computed and sorted for cache locality.
 //!
-//! See [`MATH.md`](./MATH.md) §7 for the full derivation.
+//! See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §7 for the full derivation.
 
 use crate::GwError;
 use crate::graph::Graph;

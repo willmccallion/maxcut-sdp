@@ -14,7 +14,7 @@
 //! Eigendecomposition uses the Jacobi method with threshold sweeps; the
 //! smallest eigenvalue alone, by Householder tridiagonalization and bisection.
 //!
-//! See [`MATH.md`](./MATH.md) §6 for the full list of operations and where
+//! See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §6 for the full list of operations and where
 //! each is used in the solver.
 
 use crate::GwError;
@@ -378,7 +378,7 @@ impl DenseMatrix {
     ///
     /// Equal to the dot product of the flattened data vectors — computed as a
     /// single contiguous pass for maximum vectorization. Used extensively in the
-    /// Schur complement computation (see [`MATH.md`](./MATH.md) §3.4).
+    /// Schur complement computation (see [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §3.4).
     ///
     /// # Errors
     ///
@@ -397,7 +397,7 @@ impl DenseMatrix {
     /// update it using all previous columns, then scale. This accesses memory
     /// in contiguous column strides — optimal for column-major layout.
     ///
-    /// See [`MATH.md`](./MATH.md) §3.3 (NT scaling) and §3.4 (Schur complement solve).
+    /// See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §3.3 (NT scaling) and §3.4 (Schur complement solve).
     ///
     /// # Errors
     ///
@@ -529,7 +529,7 @@ impl DenseMatrix {
     ///
     /// Reduces the matrix to tridiagonal form and bisects on its inertia,
     /// which takes `O(n³)` flops like Jacobi but with a far smaller constant.
-    /// Used for step size selection (see [`MATH.md`](./MATH.md) §3.5) and to
+    /// Used for step size selection (see [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §3.5) and to
     /// certify SDP bounds.
     ///
     /// # Errors
@@ -590,7 +590,7 @@ impl DenseMatrix {
     ///
     /// Via eigendecomposition: if `self = Q Λ Q^T`, then `self^{1/2} = Q Λ^{1/2} Q^T`.
     ///
-    /// Used in Nesterov-Todd scaling computation (see [`MATH.md`](./MATH.md) §3.3).
+    /// Used in Nesterov-Todd scaling computation (see [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §3.3).
     ///
     /// # Errors
     ///

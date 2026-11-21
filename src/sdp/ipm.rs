@@ -1,6 +1,6 @@
 //! Primal-dual interior point method for semidefinite programming.
 //!
-//! Implements the algorithm described in [`MATH.md`](./MATH.md) §3:
+//! Implements the algorithm described in [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §3:
 //!
 //! 1. Initialize `X = I`, `S = C + αI`, `y = 0`
 //! 2. At each iteration:
@@ -13,7 +13,7 @@
 //!    dual infeasibilities are all < ε, or fail after `max_iterations`
 //!
 //! The per-iteration cost is `O(m² n² + m³)` where `n` is the matrix dimension
-//! and `m` is the number of constraints. See [`MATH.md`](./MATH.md) §5.
+//! and `m` is the number of constraints. See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §5.
 
 use super::linalg::DenseMatrix;
 use super::{ConstraintMatrix, SdpProblem, SdpSolution};
@@ -21,14 +21,14 @@ use crate::GwError;
 
 /// Eigenvalues below this are raised to it before `S⁻¹`, `P^{-1/2}` or
 /// `A^{-1/2}` is formed, so a nearly singular iterate cannot blow them up.
-/// See [`MATH.md`](./MATH.md) §6.
+/// See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §6.
 const EIGENVALUE_FLOOR: f64 = 1e-14;
 
 /// Added to the Schur complement's diagonal so its Cholesky factorization
 /// survives rounding error near the optimum.
 const SCHUR_REGULARIZATION: f64 = 1e-12;
 
-/// Centering parameter `σ`: each step targets `μ_next = σ μ`. See [`MATH.md`](./MATH.md) §3.6.
+/// Centering parameter `σ`: each step targets `μ_next = σ μ`. See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §3.6.
 const CENTERING: f64 = 0.2;
 
 /// The IPM's default tolerance on its relative gap and infeasibilities.
@@ -75,7 +75,7 @@ impl IpmSolver {
     /// the relative primal and dual infeasibilities all drop below
     /// `config.epsilon`.
     ///
-    /// See [`MATH.md`](./MATH.md) §3.8 for the complete algorithm.
+    /// See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §3.8 for the complete algorithm.
     ///
     /// # Errors
     ///
@@ -200,7 +200,7 @@ impl Residuals {
     }
 
     /// Whether the relative duality gap and the relative primal and dual
-    /// infeasibilities are all below `epsilon`. See [`MATH.md`](./MATH.md) §3.7.
+    /// infeasibilities are all below `epsilon`. See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §3.7.
     fn have_converged(
         &self,
         problem: &SdpProblem,
@@ -254,7 +254,7 @@ fn dual_residual(problem: &SdpProblem, y: &[f64], s: &DenseMatrix) -> Result<Den
 
 /// What one iteration computes once and its steps share.
 struct IterationTerms {
-    /// The target `σμ`, for `μ = ⟨X, S⟩ / n`. See [`MATH.md`](./MATH.md) §3.6.
+    /// The target `σμ`, for `μ = ⟨X, S⟩ / n`. See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §3.6.
     mu: f64,
     /// The Nesterov-Todd scaling `W`.
     w: DenseMatrix,
@@ -280,7 +280,7 @@ impl IterationTerms {
 
 /// Computes the Nesterov-Todd scaling matrix `W` satisfying `W S W = X`.
 ///
-/// Algorithm (see [`MATH.md`](./MATH.md) §3.3):
+/// Algorithm (see [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §3.3):
 /// 1. Compute `X^{1/2}` via eigendecomposition
 /// 2. Form `P = X^{1/2} S X^{1/2}`
 /// 3. Compute `P^{-1/2}`
@@ -309,7 +309,7 @@ fn nt_scaling(x: &DenseMatrix, s: &DenseMatrix) -> Result<DenseMatrix, GwError> 
 /// 2. Recover `ΔS = R_d − Σ Δyᵢ Aᵢ`
 /// 3. Recover `ΔX = σμ S⁻¹ − X − W ΔS W`, symmetrized
 ///
-/// See [`MATH.md`](./MATH.md) §3.4.
+/// See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §3.4.
 fn search_direction(
     problem: &SdpProblem,
     iterate: &Iterate,
@@ -382,7 +382,7 @@ fn schur_rhs(
 }
 
 /// The step `α ∈ [0, 1]` that keeps `X + α ΔX ≻ 0` and `S + α ΔS ≻ 0`,
-/// shortened by the safety factor `γ`. See [`MATH.md`](./MATH.md) §3.5.
+/// shortened by the safety factor `γ`. See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §3.5.
 fn step_size(iterate: &Iterate, direction: &Direction, safety: f64) -> Result<f64, GwError> {
     let alpha_x = max_feasible_step(&iterate.x, &direction.dx)?;
     let alpha_s = max_feasible_step(&iterate.s, &direction.ds)?;

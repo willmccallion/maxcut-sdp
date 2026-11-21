@@ -13,7 +13,7 @@
 //!
 //! Trials can instead round with Zwick's outward rotations; see [`Rounding`].
 //!
-//! See [`MATH.md`](../MATH.md) §4–§5 for the rounding analysis.
+//! See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/maxcut/MATH.md) §4–§5 for the rounding analysis.
 
 use super::Cut;
 use crate::GwError;
@@ -119,7 +119,7 @@ pub(crate) fn extract_vectors(x: &DenseMatrix) -> Result<DenseMatrix, GwError> {
 /// vertex `i`, generates a random Gaussian vector `r` and returns the
 /// partition `sign(V^T r)` (i.e., `sign(⟨v_i, r⟩)`) as a boolean vector.
 ///
-/// See [`MATH.md`](../MATH.md) §4.
+/// See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/maxcut/MATH.md) §4.
 pub(crate) fn random_hyperplane_round(vectors: &DenseMatrix, rng: &mut impl Rng) -> Vec<bool> {
     let r = gaussian_vector(vectors.rows(), rng);
     projections(vectors, &r)
@@ -138,7 +138,7 @@ pub(crate) fn random_hyperplane_round(vectors: &DenseMatrix, rng: &mut impl Rng)
 /// `arccos(cos² θ · X_ij) / π`. `θ = 0` is hyperplane rounding and
 /// `θ = π/2` a uniformly random cut.
 ///
-/// See [`MATH.md`](../MATH.md) §4.
+/// See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/maxcut/MATH.md) §4.
 pub(crate) fn outward_rotation_round(
     vectors: &DenseMatrix,
     angle: RotationAngle,
@@ -291,7 +291,7 @@ pub(crate) fn iterated_local_search_until(
 /// iterated local search. Its seed is drawn from `rng` up front, so trials
 /// run in parallel yet a seeded run is reproducible.
 ///
-/// See [`MATH.md`](../MATH.md) §7.
+/// See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/maxcut/MATH.md) §7.
 pub(crate) fn round_trials(
     vectors: &DenseMatrix,
     graph: &Graph,

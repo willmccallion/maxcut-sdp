@@ -12,7 +12,7 @@
 //! constraints `(A_i, b_i)`. The [`SdpProblem::maxcut_relaxation`] constructor
 //! builds the Max-Cut SDP directly from a [`Graph`].
 //!
-//! See [`MATH.md`](./MATH.md) §1–§2 for definitions and duality theory.
+//! See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/sdp/MATH.md) §1–§2 for definitions and duality theory.
 
 pub mod bm;
 pub mod ipm;
@@ -185,7 +185,7 @@ impl SdpProblem {
     /// `1` at position `(i, i)`), with `b_i = 1`, held as
     /// [`ConstraintMatrix::DiagonalUnit`].
     ///
-    /// See [`maxcut/MATH.md`](../maxcut/MATH.md) §3 for the derivation.
+    /// See [`maxcut/MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/maxcut/MATH.md) §3 for the derivation.
     ///
     /// # Errors
     ///
