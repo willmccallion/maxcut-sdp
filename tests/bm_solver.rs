@@ -7,7 +7,9 @@ use maxcut_sdp::GwError;
 use maxcut_sdp::graph::Graph;
 use maxcut_sdp::maxcut::rounding::Rounding;
 use maxcut_sdp::maxcut::{GwBmConfig, gw_maxcut_bm};
-use maxcut_sdp::sdp::bm::BmSolverConfig;
+use maxcut_sdp::sdp::bm::{BmSolution, BmSolver, BmSolverConfig};
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use std::num::NonZeroUsize;
 
 /// Full GW pipeline with BM on C5: cut >= `α_GW` · OPT.
@@ -72,4 +74,32 @@ fn bm_refuses_the_empty_graph() {
     let result = gw_maxcut_bm(&Graph::new(0), &GwBmConfig::default());
 
     assert!(matches!(result, Err(GwError::InvalidGraph(_))));
+}
+
+fn bm_with_rank(graph: &Graph, rank: usize) -> Result<BmSolution, GwError> {
+    let config = BmSolverConfig {
+        rank: Some(rank),
+        ..BmSolverConfig::default()
+    };
+    BmSolver::new(config).solve_maxcut(graph, &mut StdRng::seed_from_u64(1), |_| {})
+}
+
+#[test]
+fn bm_factors_at_the_rank_asked_for() {
+    let solution = bm_with_rank(&complete(4), 4).unwrap_or_else(|e| panic!("{e}"));
+
+    assert_eq!(solution.vectors.rows(), 4);
+}
+
+#[test]
+fn bm_refuses_a_rank_outside_two_to_n() {
+    for rank in [1, 5] {
+        let result = bm_with_rank(&complete(4), rank);
+
+        assert!(
+            matches!(result, Err(GwError::InvalidConfig(_))),
+            "rank {rank}: {:?}",
+            result.map(|solution| solution.vectors.rows())
+        );
+    }
 }

@@ -50,7 +50,7 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = SolverChoice::Auto)]
     solver: SolverChoice,
 
-    /// BM factorization rank override (default: ⌈√(2n)⌉).
+    /// BM factorization rank, within 2..=n (default: ⌈√(2n)⌉).
     #[arg(long)]
     rank: Option<usize>,
 

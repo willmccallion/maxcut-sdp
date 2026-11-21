@@ -79,6 +79,14 @@ fn zero_restarts_are_refused() {
 }
 
 #[test]
+fn a_rank_past_the_vertex_count_is_refused() {
+    let output = run(&cycle_file(5), &["--solver", "bm", "--rank", "6"]);
+
+    assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
+    assert!(stderr(&output).contains("rank 6"), "{}", stderr(&output));
+}
+
+#[test]
 fn a_rotation_past_a_right_angle_is_refused() {
     let output = run(&cycle_file(5), &["--rotation", "2.0"]);
 
