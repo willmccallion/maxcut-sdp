@@ -126,13 +126,7 @@ impl BmSolver {
             .unwrap_or_else(|| ((2.0 * n as f64).sqrt()).ceil() as usize);
         let r = r.max(2).min(n);
 
-        // Phase 3: Pre-compute edge column offsets, sorted for cache locality.
-        let mut edges: Vec<(usize, usize, f64)> = graph
-            .edges()
-            .iter()
-            .map(|&(i, j, w)| (i * r, j * r, w))
-            .collect();
-        edges.sort_unstable_by_key(|&(ci, _, _)| ci);
+        let edges = column_edges(graph, r);
 
         let mut best_obj = f64::INFINITY;
         let mut best_grad_norm = 0.0;
@@ -294,6 +288,32 @@ impl BmSolver {
     }
 }
 
+/// An edge `(i, j)` addressed by where its endpoints' columns start in a
+/// column-major `r × n` factor: `i_offset = i·r`, `j_offset = j·r`, with
+/// `i < j`.
+#[derive(Debug, Clone, Copy)]
+struct ColumnEdge {
+    i_offset: usize,
+    j_offset: usize,
+    weight: f64,
+}
+
+/// The graph's edges as column offsets into a rank-`r` factor, sorted by
+/// `i_offset` for cache locality.
+fn column_edges(graph: &Graph, r: usize) -> Vec<ColumnEdge> {
+    let mut edges: Vec<ColumnEdge> = graph
+        .edges()
+        .iter()
+        .map(|&(i, j, weight)| ColumnEdge {
+            i_offset: i * r,
+            j_offset: j * r,
+            weight,
+        })
+        .collect();
+    edges.sort_unstable_by_key(|edge| edge.i_offset);
+    edges
+}
+
 /// Computes the BM objective via the dot-product identity — O(|E|·r).
 ///
 /// For unit vectors, `‖vi − vj‖² = 2(1 − ⟨vi, vj⟩)`, so
@@ -301,16 +321,16 @@ impl BmSolver {
 ///
 /// Pre-slicing to `vi`/`vj` eliminates bounds checks. The `dot()` kernel
 /// uses 4-way unrolling + FMA for full vectorization.
-fn compute_objective_sparse(edges: &[(usize, usize, f64)], vdata: &[f64], r: usize) -> f64 {
+fn compute_objective_sparse(edges: &[ColumnEdge], vdata: &[f64], r: usize) -> f64 {
     let partial_sums: Vec<f64> = edges
         .par_chunks(SUM_CHUNK)
         .map(|chunk| {
             chunk
                 .iter()
-                .map(|&(ci, cj, w)| {
-                    let vi = &vdata[ci..ci + r];
-                    let vj = &vdata[cj..cj + r];
-                    let half_w = 0.5 * w;
+                .map(|edge| {
+                    let vi = &vdata[edge.i_offset..edge.i_offset + r];
+                    let vj = &vdata[edge.j_offset..edge.j_offset + r];
+                    let half_w = 0.5 * edge.weight;
                     half_w.mul_add(dot(vi, vj), -half_w)
                 })
                 .sum::<f64>()
@@ -329,7 +349,7 @@ const SUM_CHUNK: usize = 1024;
 /// Returns `‖riem_grad‖_F`. Eliminates the separate `euc_grad` buffer and saves
 /// two full O(n·r) memory passes compared to separate gradient/projection/norm calls.
 fn compute_riemannian_gradient(
-    edges: &[(usize, usize, f64)],
+    edges: &[ColumnEdge],
     v: &DenseMatrix,
     riem_grad: &mut DenseMatrix,
 ) -> f64 {
@@ -343,8 +363,13 @@ fn compute_riemannian_gradient(
     }
 
     // 2. Edge-iteration gradient accumulation (sequential — edges share vertices).
-    for &(ci, cj, w) in edges {
-        let half_w = 0.5 * w;
+    for &ColumnEdge {
+        i_offset: ci,
+        j_offset: cj,
+        weight,
+    } in edges
+    {
+        let half_w = 0.5 * weight;
         let vi = &vdata[ci..ci + r];
         let vj = &vdata[cj..cj + r];
 
@@ -516,17 +541,6 @@ mod tests {
         graph_with(2, &[(0, 1)])
     }
 
-    /// Pre-compute edge offsets for a graph with rank r.
-    fn precompute_edges(graph: &Graph, r: usize) -> Vec<(usize, usize, f64)> {
-        let mut edges: Vec<(usize, usize, f64)> = graph
-            .edges()
-            .iter()
-            .map(|&(i, j, w)| (i * r, j * r, w))
-            .collect();
-        edges.sort_unstable_by_key(|&(ci, _, _)| ci);
-        edges
-    }
-
     #[test]
     fn random_unit_vectors_have_unit_norm() {
         use rand::SeedableRng;
@@ -554,7 +568,7 @@ mod tests {
         let r = 2;
         let n = 3;
         let v = random_unit_vectors(n, r, &mut rng);
-        let edges = precompute_edges(&g, r);
+        let edges = column_edges(&g, r);
 
         // Compute Riemannian gradient (which includes tangent projection).
         let mut riem_grad = DenseMatrix::zeros(r, n);
@@ -596,7 +610,7 @@ mod tests {
         let r = 2;
         let n = 3;
         let v = random_unit_vectors(n, r, &mut rng);
-        let edges = precompute_edges(&g, r);
+        let edges = column_edges(&g, r);
 
         let obj_sparse = compute_objective_sparse(&edges, v.data(), r);
 
@@ -624,7 +638,7 @@ mod tests {
         let r = 3;
         let n = 3;
         let v = random_unit_vectors(n, r, &mut rng);
-        let edges = precompute_edges(&g, r);
+        let edges = column_edges(&g, r);
 
         let mut riem_grad = DenseMatrix::zeros(r, n);
         let _ = compute_riemannian_gradient(&edges, &v, &mut riem_grad);
