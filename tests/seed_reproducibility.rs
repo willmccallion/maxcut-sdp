@@ -3,12 +3,12 @@
 mod common;
 
 use common::sparse_random_graph;
-use maxcut_sdp::graph::Graph;
 use maxcut_sdp::maxcut::{GwBmConfig, SdpBound, gw_maxcut_bm};
 use maxcut_sdp::sdp::solver_bm::{BmSolver, BmSolverConfig};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::num::NonZeroUsize;
+use std::sync::OnceLock;
 
 const RUNS: usize = 6;
 
@@ -54,29 +54,31 @@ fn same_seed_gives_bitwise_identical_bm_relaxation() {
     );
 }
 
-fn seeded_bm_runs(graph: &Graph, config: &GwBmConfig) -> Vec<(Vec<bool>, f64, SdpBound)> {
-    (0..RUNS)
-        .map(|_| {
-            let Ok(r) = gw_maxcut_bm(graph, config) else {
-                panic!("gw_maxcut_bm failed");
-            };
-            (r.partition, r.cut_value, r.sdp_bound)
-        })
-        .collect()
+/// Seeded pipeline runs on one graph, with one rounding trial and no ILS so
+/// the cut follows the vectors closely; computed once for every test here.
+fn seeded_bm_runs() -> &'static [(Vec<bool>, f64, SdpBound)] {
+    static RUNS_ONCE: OnceLock<Vec<(Vec<bool>, f64, SdpBound)>> = OnceLock::new();
+    RUNS_ONCE.get_or_init(|| {
+        let graph = sparse_random_graph(3000, 42);
+        let config = GwBmConfig {
+            num_trials: NonZeroUsize::MIN,
+            ils_rounds: 0,
+            seed: Some(9),
+            ..GwBmConfig::default()
+        };
+        (0..RUNS)
+            .map(|_| {
+                let r = gw_maxcut_bm(&graph, &config)
+                    .unwrap_or_else(|e| panic!("gw_maxcut_bm failed: {e}"));
+                (r.partition, r.cut_value, r.sdp_bound)
+            })
+            .collect()
+    })
 }
 
-/// One rounding trial and no ILS, so the cut follows the vectors closely.
 #[test]
 fn same_seed_gives_identical_bm_cut_and_partition() {
-    let graph = sparse_random_graph(3000, 42);
-    let config = GwBmConfig {
-        num_trials: NonZeroUsize::MIN,
-        ils_rounds: 0,
-        seed: Some(9),
-        ..GwBmConfig::default()
-    };
-
-    let runs = seeded_bm_runs(&graph, &config);
+    let runs = seeded_bm_runs();
 
     let summary: Vec<(f64, bool)> = runs
         .iter()
@@ -91,15 +93,7 @@ fn same_seed_gives_identical_bm_cut_and_partition() {
 
 #[test]
 fn same_seed_gives_bitwise_identical_bm_bound() {
-    let graph = sparse_random_graph(3000, 42);
-    let config = GwBmConfig {
-        num_trials: NonZeroUsize::MIN,
-        ils_rounds: 0,
-        seed: Some(9),
-        ..GwBmConfig::default()
-    };
-
-    let runs = seeded_bm_runs(&graph, &config);
+    let runs = seeded_bm_runs();
 
     let bounds: Vec<f64> = runs.iter().map(|run| run.2.value()).collect();
     assert!(
