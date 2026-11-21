@@ -149,6 +149,22 @@ fn dimacs_rejects_an_edge_before_the_problem_line() {
 }
 
 #[test]
+fn dimacs_rejects_a_second_problem_line() {
+    let input = "p edge 3 2\ne 1 2\np edge 3 1\ne 2 3\n";
+
+    let message = parse_error(parse_dimacs(input));
+
+    assert!(message.starts_with("line 3:"), "{message}");
+}
+
+#[test]
+fn dimacs_rejects_an_unknown_problem_format() {
+    let message = parse_error(parse_dimacs("p cnf 3 2\n"));
+
+    assert!(message.contains("`cnf`"), "{message}");
+}
+
+#[test]
 fn dimacs_requires_a_problem_line() {
     let message = parse_error(parse_dimacs("c only a comment\n"));
 
@@ -165,8 +181,8 @@ fn dimacs_error_names_the_file_line() {
 }
 
 #[test]
-fn dimacs_skips_comment_lines() {
-    let input = "c header comment\np edge 3 2\nc between edges\ne 1 2\ne 2 3 2.5\n";
+fn dimacs_skips_comments_and_reads_colouring_problem_lines() {
+    let input = "c header comment\np col 3 2\nc between edges\ne 1 2\ne 2 3 2.5\n";
 
     let edges = parse_dimacs(input).map(|g| g.edges().to_vec());
 
