@@ -8,10 +8,12 @@ I learned the theory behind this project in **CMPUT 498: Advanced Algorithms** a
 
 This project implements the entire pipeline from scratch — no CVXPY, no MOSEK, no BLAS, no external optimization or linear algebra libraries. Every component is hand-written:
 
-- **Dense linear algebra**: Cholesky factorization, eigendecomposition, matrix square roots
+- **Dense linear algebra**: Cholesky factorization, Jacobi eigendecomposition, the smallest eigenvalue by Householder tridiagonalization and bisection, matrix square roots, blocked matrix multiply
 - **Primal-dual interior point method**: Nesterov-Todd scaling, Schur complement system, central-path step control
-- **Burer-Monteiro low-rank solver**: nonlinear CG on the factored form $X = RR^T$, scalable to 20,000 nodes
-- **GW rounding pipeline**: random hyperplane rounding or Zwick's outward rotations, one-flip local search, iterated local search with variable perturbation, parallel population-based refinement
+- **Burer-Monteiro low-rank solver**: Riemannian nonlinear CG on the factored form $X = RR^T$, working from the edge list without forming the Laplacian, scalable to 20,000 nodes
+- **GW rounding pipeline**: random hyperplane rounding or Zwick's outward rotations, then iterated local search with variable perturbation starting from one-flip local search; with BM and `--time`, parallel iterated local search on the 8 best cuts until the budget ends
+
+The only dependencies are `clap` for the CLI, `rand`, and `rayon`, which runs the rounding trials, the BM objective and gradient, and the eigenvalue certificate in parallel.
 
 ## The Math
 
@@ -55,21 +57,25 @@ Tested on the [Gset benchmark suite](https://web.stanford.edu/~yyye/yyye/Gset/) 
 
 ```mermaid
 graph TD
-    A["Graph G = (V, E)"] --> B["Laplacian L = D - W"]
-    B --> C["SDP Relaxation<br/>C = -(1/4)L, X_ii = 1"]
+    A["Graph G = (V, E)"] --> S{"--solver<br/>auto: IPM if n ≤ 100, else BM"}
 
-    C --> D["Dense IPM<br/>n ≤ 100"]
-    C --> E["Burer-Monteiro<br/>X = RRᵀ, n &gt; 100"]
+    S -->|ipm| L["Dense Laplacian L = D - W<br/>C = -(1/4)L, X_ii = 1"]
+    L --> D["Dense IPM"]
+    D --> DB["Certified bound<br/>from the IPM dual"]
+    D --> DT["k rounding trials, parallel:<br/>round, then ILS from one-flip"]
+    DB --> K
+    DT --> K
 
-    D --> F["Rounding Pipeline"]
-    E --> F
+    S -->|bm| E["Burer-Monteiro X = RRᵀ<br/>edge list, no Laplacian"]
+    E --> ET["k rounding trials, parallel:<br/>round, then ILS from one-flip"]
+    ET -->|"up to --restarts restarts,<br/>each if it fits --time"| E
+    ET --> EB["Bound of the best relaxation:<br/>dual + λ_min certificate if n ≤ 3,000"]
+    EB --> T{"--time given?"}
+    T -->|yes| R["Refinement until the deadline:<br/>parallel ILS on the 8 best cuts"]
+    T -->|no| K
+    R --> K
 
-    F --> G["Hyperplane Rounding<br/>k trials, parallel"]
-    G --> H["One-Flip Local Search"]
-    H --> I["Iterated Local Search<br/>variable perturbation"]
-    I --> J["Population Refinement<br/>--time budget"]
-
-    J --> K["Max-Cut Partition<br/>S, S̄, cut value, approx ratio"]
+    K["Max-Cut Partition<br/>S, S̄, cut value, bound, approx ratio"]
 ```
 
 ## Build & Run
