@@ -95,7 +95,7 @@ fn bench_bm(c: &mut Criterion) {
         ..GwBmConfig::default()
     };
     let _ = group.bench_function("solve_and_round_sparse_1000", |b| {
-        b.iter(|| gw_maxcut_bm(&graph, &config));
+        b.iter(|| gw_maxcut_bm(&graph, &config, |_| {}));
     });
     group.finish();
 }

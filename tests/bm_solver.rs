@@ -29,7 +29,8 @@ fn bm_five_cycle_gw_guarantee() {
         time_limit: None,
     };
 
-    let result = gw_maxcut_bm(&g, &config).unwrap_or_else(|e| panic!("gw_maxcut_bm failed: {e}"));
+    let result =
+        gw_maxcut_bm(&g, &config, |_| {}).unwrap_or_else(|e| panic!("gw_maxcut_bm failed: {e}"));
 
     // GW guarantee: cut >= α_GW · OPT ≈ 0.878 · 4 ≈ 3.51.
     let alpha_gw: f64 = 0.878;
@@ -58,7 +59,8 @@ fn bm_k4_gw_guarantee() {
         time_limit: None,
     };
 
-    let result = gw_maxcut_bm(&g, &config).unwrap_or_else(|e| panic!("gw_maxcut_bm failed: {e}"));
+    let result =
+        gw_maxcut_bm(&g, &config, |_| {}).unwrap_or_else(|e| panic!("gw_maxcut_bm failed: {e}"));
 
     let alpha_gw: f64 = 0.878;
     assert!(
@@ -71,7 +73,7 @@ fn bm_k4_gw_guarantee() {
 
 #[test]
 fn bm_refuses_the_empty_graph() {
-    let result = gw_maxcut_bm(&Graph::new(0), &GwBmConfig::default());
+    let result = gw_maxcut_bm(&Graph::new(0), &GwBmConfig::default(), |_| {});
 
     assert!(matches!(result, Err(GwError::InvalidGraph(_))));
 }

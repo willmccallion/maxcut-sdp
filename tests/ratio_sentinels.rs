@@ -21,6 +21,7 @@ fn ratios(graph: &Graph) -> [Option<f64>; 2] {
             seed: Some(1),
             ..GwBmConfig::default()
         },
+        |_| {},
     );
     let ipm = ipm.unwrap_or_else(|e| panic!("ipm failed: {e}"));
     let bm = bm.unwrap_or_else(|e| panic!("bm failed: {e}"));

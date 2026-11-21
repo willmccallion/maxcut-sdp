@@ -12,11 +12,11 @@ use maxcut_sdp::GwError;
 use maxcut_sdp::maxcut::exact::exact_maxcut;
 use maxcut_sdp::maxcut::rounding::{RotationAngle, Rounding};
 use maxcut_sdp::maxcut::{
-    GwBmConfig, GwConfig, MAX_CERTIFIED_VERTICES, MaxCutResult, SdpBound, cut_ratio, gw_maxcut,
-    gw_maxcut_bm,
+    GwBmConfig, GwConfig, MAX_CERTIFIED_VERTICES, MaxCutResult, Progress, SdpBound, cut_ratio,
+    gw_maxcut, gw_maxcut_bm,
 };
 use maxcut_sdp::parser::{parse_auto, parse_biqmac, parse_dimacs};
-use maxcut_sdp::sdp::bm::BmSolverConfig;
+use maxcut_sdp::sdp::bm::{BmProgress, BmSolverConfig};
 use maxcut_sdp::sdp::ipm::IpmConfig;
 
 /// Goemans-Williamson Max-Cut approximation via semidefinite programming.
@@ -191,7 +191,10 @@ fn run(cli: &Cli) -> Result<(), GwError> {
                 seed: cli.seed,
                 time_limit: cli.time.map(Duration::from_secs),
             };
-            gw_maxcut_bm(&graph, &config)?
+            let mut best_cut = None;
+            gw_maxcut_bm(&graph, &config, |progress| {
+                report_progress(progress, &mut best_cut);
+            })?
         }
     };
     let elapsed = start.elapsed();
@@ -242,6 +245,63 @@ fn run(cli: &Cli) -> Result<(), GwError> {
     }
 
     Ok(())
+}
+
+/// Prints a run's progress to stderr. `best_cut` is the best cut of the
+/// restarts so far, which the BM iteration lines show.
+fn report_progress(progress: Progress, best_cut: &mut Option<f64>) {
+    match progress {
+        Progress::Bm(BmProgress::Iteration {
+            iteration,
+            relaxation,
+            gradient_norm,
+        }) => match best_cut {
+            Some(best) => eprintln!(
+                "  iter {iteration}: obj={relaxation:.4}, grad={gradient_norm:.2e}, best={best:.0}"
+            ),
+            None => eprintln!("  iter {iteration}: obj={relaxation:.4}, grad={gradient_norm:.2e}"),
+        },
+        Progress::Bm(BmProgress::Finished {
+            iterations,
+            relaxation,
+            gradient_norm,
+        }) => eprintln!("BM: iters={iterations}, obj={relaxation:.4}, grad={gradient_norm:.2e}"),
+        Progress::Restart {
+            restart,
+            restarts,
+            relaxation,
+            cut,
+            best,
+            elapsed,
+        } => {
+            *best_cut = Some(best);
+            eprintln!(
+                "Restart {restart}/{restarts}: relaxation={relaxation:.4}, cut={cut:.0}, best={best:.0} ({elapsed:.1?})"
+            );
+        }
+        Progress::TimeLimitStop {
+            completed,
+            restarts,
+        } => eprintln!("Time limit: stopping after {completed}/{restarts} restarts"),
+        Progress::Certified { bound, elapsed } => {
+            eprintln!("Certified bound: {bound:.4} ({elapsed:.1?})");
+        }
+        Progress::RefineImproved {
+            best,
+            slot,
+            elapsed,
+        } => eprintln!("  Refine: new best={best:.0} (slot {slot}, {elapsed:.1?})"),
+        Progress::RefineStatus {
+            best,
+            rounds,
+            elapsed,
+        } => eprintln!("  Refine: best={best:.0}, {rounds} rounds ({elapsed:.1?})"),
+        Progress::RefineDone {
+            rounds,
+            best,
+            elapsed,
+        } => eprintln!("Refinement done: {rounds} ILS rounds, best={best:.0} ({elapsed:.1?})"),
+    }
 }
 
 /// The SDP bound's report line, saying whether it is certified.

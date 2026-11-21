@@ -18,7 +18,7 @@ fn elapsed_with_budget(graph: &Graph, num_restarts: usize, budget: Duration) -> 
     };
 
     let start = Instant::now();
-    let result = gw_maxcut_bm(graph, &config);
+    let result = gw_maxcut_bm(graph, &config, |_| {});
     let elapsed = start.elapsed();
 
     if let Err(e) = result {
@@ -73,7 +73,8 @@ fn a_time_limit_never_runs_more_restarts_than_asked() {
         ..GwBmConfig::default()
     };
 
-    let result = gw_maxcut_bm(&graph, &config).unwrap_or_else(|e| panic!("solver failed: {e}"));
+    let result =
+        gw_maxcut_bm(&graph, &config, |_| {}).unwrap_or_else(|e| panic!("solver failed: {e}"));
 
     assert_eq!(result.num_trials, 2 * trials_per_restart.get());
 }
@@ -89,8 +90,8 @@ fn refinement_never_loses_the_rounded_cut() {
         ..GwBmConfig::default()
     };
 
-    let untimed = gw_maxcut_bm(&graph, &config(None));
-    let timed = gw_maxcut_bm(&graph, &config(Some(Duration::from_secs(1))));
+    let untimed = gw_maxcut_bm(&graph, &config(None), |_| {});
+    let timed = gw_maxcut_bm(&graph, &config(Some(Duration::from_secs(1))), |_| {});
 
     let untimed = untimed.unwrap_or_else(|e| panic!("untimed run failed: {e}"));
     let timed = timed.unwrap_or_else(|e| panic!("timed run failed: {e}"));
