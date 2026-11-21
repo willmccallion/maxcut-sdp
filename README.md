@@ -131,8 +131,10 @@ Outward rotations did not raise the final cut on the Biq Mac instances or on ran
 
 ### Supported Input Formats
 
-- **Biq Mac Library** (`.mc`): First line `n m`, then `m` lines of `i j w_ij`
+- **Biq Mac Library** (`.mc`, and the Gset files): First line `n m`, then lines of `i j [w]`; weights default to 1, and `m` is not checked against the edge lines
 - **DIMACS**: One problem line `p edge n m` (or `p col n m`), then `e i j [w]` lines; weights default to 1
+
+The format is detected from the content, not the file name: a line starting with `p ` or `e ` means DIMACS. Vertices are numbered from 1. Self-loops and out-of-range vertices are errors; negative weights are accepted.
 
 ## Project Structure
 
