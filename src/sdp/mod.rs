@@ -25,10 +25,20 @@ use linalg::DenseMatrix;
 /// A single affine constraint `tr(A_i X) = b_i` in the SDP.
 #[derive(Debug, Clone)]
 pub struct SdpConstraint {
+    a: ConstraintMatrix,
+    b: f64,
+}
+
+impl SdpConstraint {
     /// The constraint matrix `A_i`.
-    pub a: ConstraintMatrix,
+    pub const fn matrix(&self) -> &ConstraintMatrix {
+        &self.a
+    }
+
     /// The right-hand side scalar `b_i`.
-    pub b: f64,
+    pub const fn rhs(&self) -> f64 {
+        self.b
+    }
 }
 
 /// The matrix `A_i` of a constraint, kept in the form that is cheap for it.
@@ -84,12 +94,8 @@ impl ConstraintMatrix {
 /// and `X ≽ 0` (positive semidefinite).
 #[derive(Debug, Clone)]
 pub struct SdpProblem {
-    /// Cost matrix `C` (symmetric, `n × n`).
-    pub c: DenseMatrix,
-    /// Affine equality constraints.
-    pub constraints: Vec<SdpConstraint>,
-    /// Matrix dimension `n`.
-    pub n: usize,
+    c: DenseMatrix,
+    constraints: Vec<SdpConstraint>,
 }
 
 /// The solution returned by the SDP solver.
@@ -99,8 +105,6 @@ pub struct SdpSolution {
     pub x: DenseMatrix,
     /// Dual variables `y ∈ R^m`.
     pub y: Vec<f64>,
-    /// Dual slack matrix `S = C - Σ y_i A_i` (symmetric PSD, `n × n`).
-    pub s: DenseMatrix,
     /// Primal objective value `tr(C X)`.
     pub primal_obj: f64,
     /// Dual objective value `b^T y`.
@@ -112,16 +116,32 @@ pub struct SdpSolution {
 }
 
 impl SdpProblem {
-    /// Creates a new SDP with cost matrix `c` and no constraints.
+    /// Creates a new SDP with the symmetric cost matrix `c` and no constraints.
     ///
-    /// The matrix dimension `n` is inferred from `c`.
-    pub const fn new(c: DenseMatrix) -> Self {
-        let n = c.rows();
-        Self {
+    /// # Errors
+    ///
+    /// Returns [`GwError::InvalidMatrix`] if `c` is not square.
+    pub fn new(c: DenseMatrix) -> Result<Self, GwError> {
+        c.ensure_square("an SDP cost matrix")?;
+        Ok(Self {
             c,
             constraints: Vec::new(),
-            n,
-        }
+        })
+    }
+
+    /// The cost matrix `C`.
+    pub const fn cost(&self) -> &DenseMatrix {
+        &self.c
+    }
+
+    /// The cost matrix `C`, taken out of the problem.
+    pub fn into_cost(self) -> DenseMatrix {
+        self.c
+    }
+
+    /// The affine equality constraints.
+    pub fn constraints(&self) -> &[SdpConstraint] {
+        &self.constraints
     }
 
     /// Adds an affine constraint `tr(A X) = b`.
@@ -131,24 +151,19 @@ impl SdpProblem {
     /// Returns [`GwError::InvalidMatrix`] if `a` is not a matrix of this
     /// problem's dimension.
     pub fn add_constraint(&mut self, a: ConstraintMatrix, b: f64) -> Result<(), GwError> {
-        if !a.fits(self.n) {
+        if !a.fits(self.dimension()) {
             return Err(GwError::InvalidMatrix(format!(
                 "constraint matrix does not fit an {n} x {n} problem",
-                n = self.n
+                n = self.dimension()
             )));
         }
         self.constraints.push(SdpConstraint { a, b });
         Ok(())
     }
 
-    /// Returns the number of constraints `m`.
-    pub const fn num_constraints(&self) -> usize {
-        self.constraints.len()
-    }
-
-    /// Returns the matrix dimension `n`.
+    /// The matrix dimension `n`.
     pub const fn dimension(&self) -> usize {
-        self.n
+        self.c.rows()
     }
 
     /// Constructs the Max-Cut SDP relaxation from a graph.
@@ -178,7 +193,7 @@ impl SdpProblem {
         // C = -(1/4) L (minimizing tr(CX) = maximizing (1/4) tr(LX))
         let c = graph.laplacian().scale(-0.25);
 
-        let mut problem = Self::new(c);
+        let mut problem = Self::new(c)?;
 
         // Diagonal constraints: tr(E_ii X) = X_ii = 1
         for i in 0..n {

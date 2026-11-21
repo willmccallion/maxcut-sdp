@@ -648,7 +648,7 @@ impl DenseMatrix {
         })
     }
 
-    fn ensure_square(&self, operation: &str) -> Result<(), GwError> {
+    pub(crate) fn ensure_square(&self, operation: &str) -> Result<(), GwError> {
         if self.rows == self.cols {
             return Ok(());
         }
