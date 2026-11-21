@@ -110,19 +110,22 @@ python3 scripts/plot.py results/gset.csv charts
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--solver` | `auto` | Solver backend: `ipm` (dense, exact), `bm` (scalable), or `auto`: the IPM up to 100 vertices, BM past them |
-| `--time` | — | Time budget in seconds for `--solver bm`: up to `--restarts` restarts that fit (the first always runs to completion), then population refinement until the budget ends |
-| `--trials` | 100 | Number of hyperplane rounding trials |
+| `--time` | — | Time budget in seconds for `--solver bm`: up to `--restarts` restarts that fit (the first always runs to completion), then parallel iterated local search on the 8 best cuts until the budget ends |
+| `--trials` | 100 | Rounding trials, hyperplane or outward rotation; with BM, per restart, so a default BM run makes 300 |
 | `--ils-rounds` | 50 | Iterated local search rounds per trial |
 | `--rotation` | off | Round with Zwick's outward rotation by this angle in radians, within $[0, \pi/2]$ |
 | `--restarts` | 3 | BM random restarts |
 | `--rank` | auto | BM factorization rank, within $[2, n]$ (default: $\lceil\sqrt{2n}\rceil$) |
-| `--seed` | random | RNG seed for reproducibility |
+| `--seed` | random | RNG seed; a seeded run is reproducible, parallel parts included, unless `--time` is given: how many restarts fit and how long refinement runs then depend on the clock |
 | `--epsilon` | 1e-8 | IPM tolerance on the relative duality gap and infeasibilities (`--solver ipm` only) |
-| `--exact` | off | Also compute brute-force optimal (small graphs) |
+| `--exact` | off | Also compute the brute-force optimum, up to 24 vertices; past that it prints `Exact solver skipped` |
+| `--format` | detected | Read the file as `biqmac` or `dimacs` instead of detecting the format from its content |
 
-`--epsilon` applies only to the IPM, and `--rank`, `--restarts` and `--time` only to BM; giving one to the solver that does not read it, including the one `--solver auto` picks, is an error.
+`--epsilon` applies only to the IPM, and `--rank`, `--restarts` and `--time` only to BM; giving one to the solver that does not read it, including the one `--solver auto` picks, is an error. `--help` describes every flag.
 
-The reported SDP bound is certified: a dual solution proves no cut exceeds it, even when the solver stopped short of the SDP's optimum. BM certifies graphs of up to 3,000 vertices; past that the dense eigenvalue the certificate needs is too slow, so it prints its relaxation value, which is not a bound, and no approximation ratio.
+Results go to stdout and progress to stderr. The exit status is 0 on success; 2 for a flag the chosen solver does not read, or any other command-line error; and 1 when the file cannot be read or parsed or the solver fails, including when the reported cut does not match its partition (`VERIFICATION FAILED`).
+
+The reported SDP bound is certified: a dual solution proves no cut exceeds it, even when the solver stopped short of the SDP's optimum. BM certifies graphs of up to 3,000 vertices; past that the dense eigenvalue the certificate needs is too slow, so it prints its relaxation value, which is not a bound, and no approximation ratio. With `--time`, certification counts against the budget.
 
 Outward rotations did not raise the final cut on the Biq Mac instances or on random graphs of up to 5,000 nodes: with the default 50 ILS rounds no angle from 0.1 to 0.5 improved any of them, and larger angles lost up to 0.5% on the biggest graphs. Iterated local search already closes the gap they target, so hyperplane rounding stays the default.
 
