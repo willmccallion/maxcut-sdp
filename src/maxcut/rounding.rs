@@ -19,7 +19,7 @@ use super::Cut;
 use crate::GwError;
 use crate::graph::Graph;
 use crate::random::box_muller;
-use crate::sdp::linalg::DenseMatrix;
+use crate::sdp::linalg::{DenseMatrix, col, dot};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
@@ -153,18 +153,9 @@ fn gaussian_vector(len: usize, rng: &mut impl Rng) -> Vec<f64> {
 
 /// `⟨v_i, r⟩` for every column `v_i` of `vectors`.
 fn projections(vectors: &DenseMatrix, r: &[f64]) -> Vec<f64> {
-    let dim = vectors.rows();
-    let vdata = vectors.data();
-    let mut dots = Vec::with_capacity(vectors.cols());
-    for i in 0..vectors.cols() {
-        let col = &vdata[i * dim..(i + 1) * dim];
-        let mut dot = 0.0_f64;
-        for k in 0..dim {
-            dot = col[k].mul_add(r[k], dot);
-        }
-        dots.push(dot);
-    }
-    dots
+    (0..vectors.cols())
+        .map(|i| dot(col(vectors.data(), i, vectors.rows()), r))
+        .collect()
 }
 
 /// One-flip local search: greedy post-processing of a partition.
