@@ -1,8 +1,12 @@
 //! Accuracy of the Jacobi eigendecomposition at small scales.
+//!
+//! The failure after `MAX_JACOBI_SWEEPS` is not tested: no finite symmetric
+//! matrix is known to need that many sweeps, and NaNs are refused up front.
 
 mod common;
 
 use common::erdos_renyi;
+use maxcut_sdp::GwError;
 use maxcut_sdp::sdp::linalg::DenseMatrix;
 
 fn frobenius(m: &DenseMatrix) -> f64 {
@@ -68,7 +72,7 @@ fn tiny_off_diagonal_matrix_has_plus_minus_eigenvalues() {
 }
 
 #[test]
-fn eigendecomposition_reports_failure_instead_of_returning_unconverged_values() {
+fn eigendecomposition_rejects_a_non_finite_entry() {
     let Ok(a) = DenseMatrix::from_vec(2, 2, vec![1.0, f64::NAN, f64::NAN, 2.0]) else {
         panic!("four values fill a 2 x 2 matrix");
     };
@@ -76,8 +80,8 @@ fn eigendecomposition_reports_failure_instead_of_returning_unconverged_values() 
     let result = a.eigendecomposition_symmetric();
 
     assert!(
-        result.is_err(),
-        "returned Ok after exhausting the sweep cap: {:?}",
+        matches!(result, Err(GwError::InvalidMatrix(_))),
+        "{:?}",
         result.map(|(values, _)| values)
     );
 }
