@@ -128,6 +128,7 @@ src/
 ├── lib.rs               Crate root, error types, re-exports
 ├── graph.rs             Graph representation and Laplacian construction
 ├── parser.rs            Biq Mac and DIMACS format parsers
+├── random.rs            Box-Muller normal samples
 ├── sdp/
 │   ├── mod.rs           SDP problem formulation
 │   ├── ipm.rs           Primal-dual interior point method
@@ -135,7 +136,8 @@ src/
 │   ├── linalg.rs        Dense linear algebra (Cholesky, eigendecomp, etc.)
 │   └── MATH.md          Mathematical reference
 └── maxcut/
-    ├── mod.rs           GW algorithm orchestration + refinement loop
+    ├── mod.rs           GW pipeline, solver backends, certified bounds
+    ├── bm_pipeline.rs   BM restarts and time-budgeted refinement
     ├── rounding.rs      Hyperplane rounding, one-flip local search, ILS
     ├── exact.rs         Brute-force exact solver (small graphs)
     └── MATH.md          Mathematical reference
