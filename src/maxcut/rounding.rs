@@ -394,6 +394,116 @@ mod tests {
         vectors
     }
 
+    /// About `degree` neighbours per vertex, with weights 1 to 10.
+    fn random_graph(n: usize, degree: f64, seed: u64) -> Graph {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut graph = Graph::new(n);
+        for u in 0..n {
+            for v in u + 1..n {
+                if rng.random::<f64>() < degree / n as f64 {
+                    let weight = f64::from(rng.random_range(1..=10_u32));
+                    graph
+                        .add_edge(u, v, weight)
+                        .unwrap_or_else(|e| panic!("{e}"));
+                }
+            }
+        }
+        graph
+    }
+
+    fn random_partition(n: usize, seed: u64) -> Vec<bool> {
+        let mut rng = StdRng::seed_from_u64(seed);
+        (0..n).map(|_| rng.random()).collect()
+    }
+
+    fn plan(trials: usize, ils_rounds: usize) -> TrialPlan {
+        TrialPlan {
+            trials: NonZeroUsize::new(trials).unwrap_or_else(|| panic!("{trials} trials")),
+            ils_rounds,
+            rounding: Rounding::Hyperplane,
+        }
+    }
+
+    /// The cut gained by moving `v` to the other side.
+    fn flip_gain(graph: &Graph, partition: &[bool], v: usize) -> f64 {
+        graph
+            .neighbors(v)
+            .iter()
+            .map(|&(u, w)| if partition[u] == partition[v] { w } else { -w })
+            .sum()
+    }
+
+    #[test]
+    fn one_flip_search_ends_where_no_flip_helps_and_reports_that_cut() {
+        let graph = random_graph(200, 6.0, 1);
+        let mut partition = random_partition(200, 2);
+
+        let cut = one_flip_local_search(&mut partition, &graph);
+
+        assert_eq!(cut, graph.cut_value(&partition));
+        let improving: Vec<usize> = (0..200)
+            .filter(|&v| flip_gain(&graph, &partition, v) > 0.0)
+            .collect();
+        assert_eq!(improving, Vec::<usize>::new());
+    }
+
+    #[test]
+    fn iterated_search_is_never_worse_than_its_first_local_optimum() {
+        let graph = random_graph(200, 6.0, 3);
+        let start = random_partition(200, 4);
+        let first_optimum = one_flip_local_search(&mut start.clone(), &graph);
+
+        let mut partition = start;
+        let cut = iterated_local_search(&mut partition, &graph, 30, &mut StdRng::seed_from_u64(5));
+
+        assert!(cut >= first_optimum, "{cut} < {first_optimum}");
+        assert_eq!(cut, graph.cut_value(&partition));
+    }
+
+    #[test]
+    fn the_pool_holds_the_best_cuts_best_first() {
+        let graph = random_graph(60, 4.0, 6);
+        let vectors = random_vectors(8, 60, 7);
+
+        let (best, pool) = multi_round_with_pool(
+            &vectors,
+            &graph,
+            plan(20, 2),
+            5,
+            &mut StdRng::seed_from_u64(8),
+        );
+
+        assert_eq!(pool.len(), 5);
+        assert!(
+            pool.windows(2)
+                .all(|pair| pair[0].cut_value >= pair[1].cut_value)
+        );
+        assert_eq!(best.partition, pool[0].partition);
+    }
+
+    #[test]
+    fn pooled_and_plain_trials_pick_the_same_best_cut() {
+        let graph = random_graph(60, 4.0, 9);
+        let vectors = random_vectors(8, 60, 10);
+
+        let plain = multi_round_from_vectors(
+            &vectors,
+            &graph,
+            plan(20, 0),
+            &mut StdRng::seed_from_u64(11),
+        );
+        let (pooled, _) = multi_round_with_pool(
+            &vectors,
+            &graph,
+            plan(20, 0),
+            5,
+            &mut StdRng::seed_from_u64(11),
+        );
+
+        assert_eq!(plain.partition, pooled.partition);
+        assert_eq!(plain.cut_value.to_bits(), pooled.cut_value.to_bits());
+    }
+
     fn angle(radians: f64) -> RotationAngle {
         let Some(angle) = RotationAngle::new(radians) else {
             panic!("{radians} is a valid rotation angle");
