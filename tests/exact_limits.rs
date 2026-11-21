@@ -5,7 +5,7 @@ mod common;
 use common::{cycle, graph_with};
 use maxcut_sdp::GwError;
 use maxcut_sdp::graph::Graph;
-use maxcut_sdp::maxcut::exact::{exact_maxcut, exact_maxcut_bounded};
+use maxcut_sdp::maxcut::exact::{DEFAULT_MAX_VERTICES, exact_maxcut, exact_maxcut_bounded};
 
 #[test]
 fn exact_rejects_more_vertices_than_a_mask_holds() {
@@ -23,7 +23,7 @@ fn exact_rejects_more_vertices_than_a_mask_holds() {
 
 #[test]
 fn exact_rejects_graphs_past_its_default_limit() {
-    let result = exact_maxcut(&cycle(25));
+    let result = exact_maxcut(&cycle(DEFAULT_MAX_VERTICES + 1));
 
     assert!(
         matches!(result, Err(GwError::InvalidGraph(_))),

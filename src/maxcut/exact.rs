@@ -1,8 +1,8 @@
 //! Brute-force exact Max-Cut solver for small graphs.
 //!
 //! Enumerates all `2^n` possible vertex partitions and returns the one with the
-//! maximum cut value. This is only feasible for small graphs (`n ≤ 24` or so)
-//! but provides ground-truth values for testing the GW approximation.
+//! maximum cut value. This is only feasible for small graphs, but provides
+//! ground-truth values for testing the GW approximation.
 //!
 //! The inner loop is optimized to avoid allocation: the partition is decoded
 //! from the integer bitmask directly.
@@ -14,6 +14,9 @@ use crate::graph::Graph;
 /// Most vertices a partition bitmask can hold with the shift `1 << n` in a `u64`.
 const MAX_MASK_VERTICES: usize = 63;
 
+/// The vertex limit of [`exact_maxcut`], where enumeration takes seconds.
+pub const DEFAULT_MAX_VERTICES: usize = 24;
+
 /// Computes the exact maximum cut by brute-force enumeration.
 ///
 /// Iterates over all `2^n` partitions of the vertex set. Returns the partition
@@ -21,20 +24,17 @@ const MAX_MASK_VERTICES: usize = 63;
 ///
 /// # Errors
 ///
-/// Returns [`GwError::InvalidGraph`] if the graph has more than 24 vertices.
+/// Returns [`GwError::InvalidGraph`] if the graph has more than
+/// [`DEFAULT_MAX_VERTICES`] vertices.
 pub fn exact_maxcut(graph: &Graph) -> Result<Cut, GwError> {
-    exact_maxcut_bounded(graph, 24)
+    exact_maxcut_bounded(graph, DEFAULT_MAX_VERTICES)
 }
 
-/// Computes the exact maximum cut, with a caller-specified vertex limit.
+/// [`exact_maxcut`] with a caller-specified vertex limit.
 ///
-/// Same as [`exact_maxcut`] but allows the caller to set the maximum number
-/// of vertices (rather than the hardcoded limit of 24).
-///
-/// The algorithm iterates over bitmasks `0..2^n`. For each bitmask, bit `i`
-/// indicates whether vertex `i` is in set `S`. The cut value is computed
-/// directly from the edge list using bitwise XOR to check crossing edges —
-/// no allocation per iteration.
+/// Bit `i` of each mask puts vertex `i` in `S`. Only masks with vertex 0 in
+/// `S` are tried, since a partition and its complement cut alike, and the
+/// first mask of the largest cut wins.
 ///
 /// # Errors
 ///
@@ -56,47 +56,34 @@ pub fn exact_maxcut_bounded(graph: &Graph, max_vertices: usize) -> Result<Cut, G
     }
 
     let edges = graph.edges();
-    let total_masks = 1_u64 << n;
-
     let mut best_mask = 0_u64;
     let mut best_cut = 0.0_f64;
-
-    // By symmetry, we only need to check masks where vertex 0 is in S
-    // (bit 0 = 1). The complementary partition gives the same cut value.
-    // This halves the search space.
-    let start = 1_u64;
-    let end = total_masks;
-
-    for mask in start..end {
-        // Only consider masks with bit 0 set (symmetry breaking).
-        if mask & 1 == 0 {
-            continue;
-        }
-
-        let mut cut = 0.0_f64;
-        for &(u, v, w) in edges {
-            // Edge crosses the cut iff bits u and v differ.
-            let u_side = (mask >> u) & 1;
-            let v_side = (mask >> v) & 1;
-            if u_side != v_side {
-                cut += w;
-            }
-        }
-
+    for mask in (1..1_u64 << n).step_by(2) {
+        let cut = mask_cut_value(edges, mask);
         if cut > best_cut {
             best_cut = cut;
             best_mask = mask;
         }
     }
 
-    // Decode the best mask into a partition vector.
-    let mut partition = Vec::with_capacity(n);
-    for i in 0..n {
-        partition.push((best_mask >> i) & 1 == 1);
-    }
-
     Ok(Cut {
-        partition,
+        partition: partition_from_mask(best_mask, n),
         cut_value: best_cut,
     })
+}
+
+/// The weight of the edges whose ends' bits differ in `mask`.
+fn mask_cut_value(edges: &[(usize, usize, f64)], mask: u64) -> f64 {
+    let mut cut = 0.0_f64;
+    for &(u, v, w) in edges {
+        if (mask >> u) & 1 != (mask >> v) & 1 {
+            cut += w;
+        }
+    }
+    cut
+}
+
+/// The partition of `n` vertices whose bits `mask` sets in `S`.
+fn partition_from_mask(mask: u64, n: usize) -> Vec<bool> {
+    (0..n).map(|i| (mask >> i) & 1 == 1).collect()
 }
