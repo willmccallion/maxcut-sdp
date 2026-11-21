@@ -95,8 +95,11 @@ cargo build --release
 # Run with exact comparison (small graphs only)
 ./target/release/maxcut-sdp graph.txt --solver ipm --exact
 
-# Reproduce benchmarks
+# Reproduce benchmarks: fetch the Gset graphs (benchmark.sh skips missing ones),
+# run BM with --seed 42 and a size-based --time budget, then draw the charts (needs matplotlib)
+./scripts/download.py gset
 mkdir -p results && ./scripts/benchmark.sh > results/gset.csv
+python3 scripts/plot.py results/gset.csv charts
 
 # Generate a random sparse graph: 5,000 vertices, about five neighbours each
 ./scripts/gen_random_graph.py 5000 > random_5000.txt
