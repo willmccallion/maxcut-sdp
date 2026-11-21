@@ -88,6 +88,12 @@ impl ConstraintMatrix {
     }
 }
 
+/// The Max-Cut SDP's cost matrix `C = −L/4` for the Laplacian `L` of
+/// `graph`: minimizing `tr(C X)` maximizes `tr(L X) / 4`.
+pub(crate) fn maxcut_cost(graph: &Graph) -> DenseMatrix {
+    graph.laplacian().scale(-0.25)
+}
+
 /// A semidefinite program in standard form.
 ///
 /// Minimize `tr(C X)` subject to `tr(A_i X) = b_i` for all constraints,
@@ -190,10 +196,7 @@ impl SdpProblem {
             return Err(GwError::InvalidGraph("empty graph".to_string()));
         }
 
-        // C = -(1/4) L (minimizing tr(CX) = maximizing (1/4) tr(LX))
-        let c = graph.laplacian().scale(-0.25);
-
-        let mut problem = Self::new(c)?;
+        let mut problem = Self::new(maxcut_cost(graph))?;
 
         // Diagonal constraints: tr(E_ii X) = X_ii = 1
         for i in 0..n {

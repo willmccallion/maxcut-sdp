@@ -23,10 +23,10 @@ use std::time::{Duration, Instant};
 use crate::GwError;
 use crate::graph::Graph;
 use crate::maxcut::rounding::{Rounding, TrialPlan};
-use crate::sdp::SdpProblem;
 use crate::sdp::bm::{BmSolver, BmSolverConfig};
 use crate::sdp::ipm::{IpmConfig, IpmSolver};
 use crate::sdp::linalg::{DenseMatrix, col, dot};
+use crate::sdp::{SdpProblem, maxcut_cost};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
@@ -138,9 +138,10 @@ fn bm_bound(graph: &Graph, relaxation: f64, vectors: &DenseMatrix) -> Result<Sdp
         return Ok(SdpBound::Relaxation(relaxation));
     }
     let y = dual_from_vectors(graph, vectors);
-    let mut cost = graph.laplacian();
-    cost.scale_assign(-0.25);
-    Ok(SdpBound::Certified(certified_bound(cost, &y)?))
+    Ok(SdpBound::Certified(certified_bound(
+        maxcut_cost(graph),
+        &y,
+    )?))
 }
 
 /// Whether a step expected to take `expected`, started at `now`, finishes by
@@ -463,7 +464,7 @@ mod tests {
     #[test]
     fn the_certificate_of_a_zero_dual_is_the_eigenvalue_bound() {
         let graph = five_cycle();
-        let cost = graph.laplacian().scale(-0.25);
+        let cost = maxcut_cost(&graph);
         let lambda_max = -cost.min_eigenvalue().unwrap_or_else(|e| panic!("{e}"));
 
         let bound = certified_bound(cost, &[0.0; 5]);
