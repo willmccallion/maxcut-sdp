@@ -18,6 +18,7 @@
 pub mod graph;
 pub mod maxcut;
 pub mod parser;
+mod random;
 pub mod sdp;
 
 use std::fmt;
