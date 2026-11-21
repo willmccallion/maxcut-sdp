@@ -46,12 +46,21 @@ pub enum GwError {
     /// A matrix expected to be positive definite is not.
     NotPositiveDefinite,
 
-    /// Matrix dimensions do not match for the requested operation.
+    /// A matrix's inner dimension, or a vector's length, does not match
+    /// the operation's other operand.
     DimensionMismatch {
         /// The expected dimension.
         expected: usize,
         /// The actual dimension encountered.
         got: usize,
+    },
+
+    /// Two matrices an element-wise operation combines differ in shape.
+    ShapeMismatch {
+        /// The `(rows, cols)` the operation needed.
+        expected: (usize, usize),
+        /// The `(rows, cols)` it was given.
+        got: (usize, usize),
     },
 }
 
@@ -66,6 +75,13 @@ impl fmt::Display for GwError {
             Self::DimensionMismatch { expected, got } => {
                 write!(f, "dimension mismatch: expected {expected}, got {got}")
             }
+            Self::ShapeMismatch {
+                expected: (expected_rows, expected_cols),
+                got: (rows, cols),
+            } => write!(
+                f,
+                "shape mismatch: expected {expected_rows}x{expected_cols}, got {rows}x{cols}"
+            ),
         }
     }
 }
