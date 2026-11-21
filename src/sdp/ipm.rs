@@ -36,7 +36,8 @@ const CENTERING: f64 = 0.2;
 pub struct IpmConfig {
     /// Maximum number of IPM iterations before giving up.
     pub max_iterations: usize,
-    /// Convergence tolerance for the duality gap.
+    /// Tolerance on the relative duality gap and on the relative primal and
+    /// dual infeasibilities.
     pub epsilon: f64,
     /// Safety factor for step size (`γ` in the line search, typically 0.95–0.99).
     pub step_safety: f64,
@@ -80,337 +81,309 @@ impl IpmSolver {
     /// definite, and [`GwError::SolverFailed`] when `config.max_iterations`
     /// pass without converging.
     pub fn solve(&self, problem: &SdpProblem) -> Result<SdpSolution, GwError> {
-        let n = problem.dimension();
-        let m = problem.constraints().len();
-        let (mut x, mut y, mut s) = self.initialize(problem)?;
-
-        let mut iterations = 0;
-
-        while !Self::has_converged(problem, &x, &y, &s, self.config.epsilon)? {
+        let mut iterate = Iterate::initial(problem)?;
+        for iterations in 0.. {
+            let residuals = Residuals::of(problem, &iterate)?;
+            if residuals.have_converged(problem, &iterate.x, self.config.epsilon)? {
+                return Ok(iterate.into_solution(problem, &residuals, iterations));
+            }
             if iterations == self.config.max_iterations {
-                return Err(GwError::SolverFailed(format!(
-                    "interior point method did not converge in {iterations} iterations"
-                )));
+                break;
             }
-            iterations += 1;
-
-            let mu_target = CENTERING * Self::complementarity(&x, &s, n)?;
-
-            // Compute NT scaling W.
-            let w = Self::compute_nt_scaling(&x, &s)?;
-
-            // Compute search direction.
-            let (dx, dy, ds) = Self::compute_search_direction(problem, &x, &y, &s, mu_target, &w)?;
-
-            // Line search for step size.
-            let alpha = Self::compute_step_size(&x, &dx, &s, &ds, self.config.step_safety)?;
-
-            // Update iterates.
-            let scaled_dx = dx.scale(alpha);
-            let scaled_ds = ds.scale(alpha);
-            x.add_assign(&scaled_dx).map_err(at("X update"))?;
-            s.add_assign(&scaled_ds).map_err(at("S update"))?;
-            for i in 0..m {
-                y[i] = alpha.mul_add(dy[i], y[i]);
-            }
+            let terms = IterationTerms::new(problem, &iterate, residuals)?;
+            let direction = search_direction(problem, &iterate, &terms)?;
+            let alpha = step_size(&iterate, &direction, self.config.step_safety)?;
+            iterate.advance(&direction, alpha)?;
         }
-
-        let primal_obj = problem.cost().inner_product(&x).map_err(at("primal obj"))?;
-        let dual_obj: f64 = problem
-            .constraints()
-            .iter()
-            .zip(&y)
-            .map(|(c, &yi)| c.b * yi)
-            .sum();
-        let duality_gap = Self::complementarity(&x, &s, n)?;
-
-        Ok(SdpSolution {
-            x,
-            y,
-            primal_obj,
-            dual_obj,
-            duality_gap,
-            iterations,
-        })
+        Err(GwError::SolverFailed(format!(
+            "interior point method did not converge in {} iterations",
+            self.config.max_iterations
+        )))
     }
+}
 
-    /// Computes the starting point `(X, y, S)`.
-    ///
-    /// `X = I` satisfies the primal constraints and `S = C + αI` is positive
-    /// definite, but with `y = 0` the shift leaves the dual infeasible; the
-    /// search direction drives that dual residual to zero.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if initialization fails.
-    #[allow(clippy::unused_self)]
-    fn initialize(
-        &self,
-        problem: &SdpProblem,
-    ) -> Result<(DenseMatrix, Vec<f64>, DenseMatrix), GwError> {
-        let n = problem.dimension();
-        let m = problem.constraints().len();
+/// The primal-dual point `(X, y, S)` the method moves.
+struct Iterate {
+    x: DenseMatrix,
+    y: Vec<f64>,
+    s: DenseMatrix,
+}
 
-        let x = DenseMatrix::identity(n);
-        let y = vec![0.0; m];
+/// A step `(ΔX, Δy, ΔS)` from an iterate.
+struct Direction {
+    dx: DenseMatrix,
+    dy: Vec<f64>,
+    ds: DenseMatrix,
+}
 
-        // S = C - Σ y_i A_i = C (since y = 0).
-        // If C is not PD, shift: S = C + α I to ensure S ≻ 0.
+impl Iterate {
+    /// The starting point: `X = I` satisfies the primal constraints, and
+    /// `S = C + αI` is positive definite, though with `y = 0` the shift leaves
+    /// the dual infeasible until the steps drive its residual to zero.
+    fn initial(problem: &SdpProblem) -> Result<Self, GwError> {
         let mut s = problem.cost().clone();
         let min_eig = s.min_eigenvalue().map_err(at("init eigenvalue"))?;
         if min_eig <= 0.0 {
             s.add_to_diagonal(-min_eig + 1.0);
         }
-
-        Ok((x, y, s))
+        Ok(Self {
+            x: DenseMatrix::identity(problem.dimension()),
+            y: vec![0.0; problem.constraints().len()],
+            s,
+        })
     }
 
-    /// Computes the Nesterov-Todd scaling matrix `W` satisfying `W S W = X`.
-    ///
-    /// Algorithm (see [`MATH.md`](./MATH.md) §3.3):
-    /// 1. Compute `X^{1/2}` via eigendecomposition
-    /// 2. Form `P = X^{1/2} S X^{1/2}`
-    /// 3. Compute `P^{-1/2}`
-    /// 4. `W = X^{1/2} P^{-1/2} X^{1/2}`
-    ///
-    /// Verification: `W S W = X^{1/2} P^{-1/2} X^{1/2} S X^{1/2} P^{-1/2} X^{1/2}`
-    ///             = `X^{1/2} P^{-1/2} P P^{-1/2} X^{1/2}` = `X^{1/2} I X^{1/2}` = `X`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if `X` or `S` is not positive definite.
-    fn compute_nt_scaling(x: &DenseMatrix, s: &DenseMatrix) -> Result<DenseMatrix, GwError> {
-        let x_half = x.sqrt_spd().map_err(at("NT X^1/2"))?;
-
-        // P = X^{1/2} S X^{1/2} — should be SPD, but floating-point
-        // errors in the eigendecomposition can introduce tiny negative
-        // eigenvalues. We symmetrize and clamp.
-        let mut p = x_half.congruence(s).map_err(at("NT P"))?;
-        p.symmetrize();
-
-        // P^{-1/2} with tolerance-aware clamping of eigenvalues.
-        let p_inv_half = p
-            .inv_sqrt_clamped(EIGENVALUE_FLOOR)
-            .map_err(at("NT P^-1/2"))?;
-
-        // W = X^{1/2} P^{-1/2} X^{1/2}
-        let mut w = x_half.congruence(&p_inv_half).map_err(at("NT W"))?;
-        w.symmetrize();
-
-        Ok(w)
+    /// Moves `alpha` of the way along `direction`.
+    fn advance(&mut self, direction: &Direction, alpha: f64) -> Result<(), GwError> {
+        self.x
+            .add_assign(&direction.dx.scale(alpha))
+            .map_err(at("X update"))?;
+        self.s
+            .add_assign(&direction.ds.scale(alpha))
+            .map_err(at("S update"))?;
+        for (yi, &dyi) in self.y.iter_mut().zip(&direction.dy) {
+            *yi = alpha.mul_add(dyi, *yi);
+        }
+        Ok(())
     }
 
-    /// Forms the Schur complement matrix `M` and right-hand side `h`.
-    ///
-    /// From the NT-symmetrized KKT system:
-    ///   `ΔX = σμ S⁻¹ − X − W ΔS W`
-    ///   `ΔS = R_d − Σ Δyⱼ Aⱼ`
-    ///   `tr(Aᵢ ΔX) = rₚᵢ`
-    ///
-    /// Substituting gives: `M Δy = h` where
-    ///   `M_ij = tr(Aᵢ W Aⱼ W)`
-    ///   `hᵢ = rₚᵢ − tr(Aᵢ (σμ S⁻¹ − X)) + tr(Aᵢ W R_d W)`
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if matrix operations fail.
-    fn form_schur_complement(
+    fn into_solution(
+        self,
         problem: &SdpProblem,
-        w: &DenseMatrix,
-        x: &DenseMatrix,
-        y: &[f64],
-        s: &DenseMatrix,
-        mu: f64,
-    ) -> Result<(DenseMatrix, Vec<f64>), GwError> {
-        let m = problem.constraints().len();
-
-        let scaled: Vec<ScaledConstraint<'_>> = problem
+        residuals: &Residuals,
+        iterations: usize,
+    ) -> SdpSolution {
+        let dual_obj = problem
             .constraints()
             .iter()
-            .map(|ci| ScaledConstraint::new(ci.matrix(), w))
-            .collect::<Result<_, _>>()?;
-
-        // M_ij = tr(A_i W A_j W)
-        let mut schur = DenseMatrix::zeros(m, m);
-        for i in 0..m {
-            for j in i..m {
-                let val = scaled[i].schur_entry(&scaled[j], w)?;
-                schur.set(i, j, val);
-                schur.set(j, i, val);
-            }
+            .zip(&self.y)
+            .map(|(c, &yi)| c.rhs() * yi)
+            .sum();
+        SdpSolution {
+            x: self.x,
+            y: self.y,
+            primal_obj: residuals.primal_obj,
+            dual_obj,
+            duality_gap: residuals.complementarity / problem.dimension() as f64,
+            iterations,
         }
-
-        // RHS: h_i = r_{p,i} - tr(A_i (σμ S^{-1} - X)) + tr(A_i W R_d W)
-        let s_inv = s
-            .inverse_regularized(EIGENVALUE_FLOOR)
-            .map_err(at("Schur S^-1"))?;
-        let centering = s_inv.scale(mu).sub(x).map_err(at("Schur centering"))?;
-
-        let rd = Self::dual_residual(problem, y, s)?;
-
-        let w_rd_w = w.congruence(&rd).map_err(at("Schur W*Rd*W"))?;
-
-        let mut h = vec![0.0; m];
-        for (i, ci) in problem.constraints().iter().enumerate() {
-            let rp = ci.rhs() - ci.matrix().inner_product(x).map_err(at("Schur rp"))?;
-            let center_term = ci
-                .matrix()
-                .inner_product(&centering)
-                .map_err(at("Schur center"))?;
-            let rd_term = ci
-                .matrix()
-                .inner_product(&w_rd_w)
-                .map_err(at("Schur rd_term"))?;
-            h[i] = rp - center_term + rd_term;
-        }
-
-        Ok((schur, h))
     }
+}
 
-    /// Computes the full search direction `(ΔX, Δy, ΔS)`.
-    ///
-    /// 1. Form Schur complement system `M Δy = h`
-    /// 2. Solve via Cholesky
-    /// 3. Recover `ΔS = R_d − Σ Δyᵢ Aᵢ`
-    /// 4. Recover `ΔX = σμ S⁻¹ − X − W ΔS W` (with symmetrization)
-    ///
-    /// See [`MATH.md`](./MATH.md) §3.4.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the Schur system is singular or ill-conditioned.
-    fn compute_search_direction(
-        problem: &SdpProblem,
-        x: &DenseMatrix,
-        y: &[f64],
-        s: &DenseMatrix,
-        mu: f64,
-        w: &DenseMatrix,
-    ) -> Result<(DenseMatrix, Vec<f64>, DenseMatrix), GwError> {
-        // Form and solve Schur complement system.
-        let (schur, h) = Self::form_schur_complement(problem, w, x, y, s, mu)?;
+/// What an iterate leaves to do: the quantities the convergence test and the
+/// next step share.
+struct Residuals {
+    /// `tr(C X)`.
+    primal_obj: f64,
+    /// `⟨X, S⟩`.
+    complementarity: f64,
+    /// The dual residual `R_d = C − Σ yᵢ Aᵢ − S`.
+    rd: DenseMatrix,
+}
 
-        let mut schur_reg = schur;
-        schur_reg.add_to_diagonal(SCHUR_REGULARIZATION);
-
-        let l_schur = schur_reg.cholesky().map_err(at("Schur Cholesky"))?;
-        let dy = DenseMatrix::cholesky_solve(&l_schur, &h).map_err(at("Schur solve"))?;
-
-        // ΔS = R_d − Σ Δy_i A_i
-        let mut ds = Self::dual_residual(problem, y, s)?;
-        for (ci, &dyi) in problem.constraints().iter().zip(&dy) {
-            ci.matrix()
-                .add_scaled_to(&mut ds, -dyi)
-                .map_err(at("ds update"))?;
-        }
-
-        // ΔX = σμ S⁻¹ − X − W ΔS W  (note the MINUS sign on W ΔS W)
-        let s_inv = s
-            .inverse_regularized(EIGENVALUE_FLOOR)
-            .map_err(at("dx S^-1"))?;
-
-        let mut dx = s_inv.scale(mu);
-        dx.sub_assign(x).map_err(at("dx sub X"))?;
-
-        let w_ds_w = w.congruence(&ds).map_err(at("dx W*dS*W"))?;
-        dx.sub_assign(&w_ds_w).map_err(at("dx sub WdSW"))?;
-
-        // Symmetrize ΔX to correct floating-point asymmetry.
-        dx.symmetrize();
-
-        Ok((dx, dy, ds))
-    }
-
-    /// Computes the maximum step size `α` that keeps `X + α ΔX ≻ 0` and `S + α ΔS ≻ 0`.
-    ///
-    /// Uses minimum eigenvalue of the scaled direction matrices.
-    /// Applies the safety factor `γ`. See [`MATH.md`](./MATH.md) §3.5.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if eigenvalue computation fails.
-    fn compute_step_size(
-        x: &DenseMatrix,
-        dx: &DenseMatrix,
-        s: &DenseMatrix,
-        ds: &DenseMatrix,
-        safety: f64,
-    ) -> Result<f64, GwError> {
-        let alpha_x = max_feasible_step(x, dx)?;
-        let alpha_s = max_feasible_step(s, ds)?;
-        let alpha = safety * alpha_x.min(alpha_s);
-        // Clamp to [0, 1].
-        Ok(alpha.clamp(0.0, 1.0))
-    }
-
-    /// Computes the complementarity measure `μ = ⟨X, S⟩ / n`.
-    ///
-    /// See [`MATH.md`](./MATH.md) §3.6.
-    fn complementarity(x: &DenseMatrix, s: &DenseMatrix, n: usize) -> Result<f64, GwError> {
-        let xs = x.inner_product(s).map_err(at("complementarity"))?;
-        Ok(xs / n as f64)
+impl Residuals {
+    fn of(problem: &SdpProblem, iterate: &Iterate) -> Result<Self, GwError> {
+        Ok(Self {
+            primal_obj: problem
+                .cost()
+                .inner_product(&iterate.x)
+                .map_err(at("primal objective"))?,
+            complementarity: iterate
+                .x
+                .inner_product(&iterate.s)
+                .map_err(at("complementarity"))?,
+            rd: dual_residual(problem, &iterate.y, &iterate.s)?,
+        })
     }
 
     /// Whether the relative duality gap and the relative primal and dual
-    /// infeasibilities are all below `epsilon`.
-    ///
-    /// See [`MATH.md`](./MATH.md) §3.7.
-    fn has_converged(
+    /// infeasibilities are all below `epsilon`. See [`MATH.md`](./MATH.md) §3.7.
+    fn have_converged(
+        &self,
         problem: &SdpProblem,
         x: &DenseMatrix,
-        y: &[f64],
-        s: &DenseMatrix,
         epsilon: f64,
     ) -> Result<bool, GwError> {
-        let primal_obj = problem
-            .cost()
-            .inner_product(x)
-            .map_err(at("convergence primal obj"))?;
-        let xs = x.inner_product(s).map_err(at("convergence gap"))?;
-        let gap = xs / (1.0 + primal_obj.abs());
+        Ok(self.relative_gap() < epsilon
+            && primal_infeasibility(problem, x)? < epsilon
+            && self.dual_infeasibility(problem)? < epsilon)
+    }
 
-        let mut primal_residual_sq = 0.0_f64;
-        let mut b_sq = 0.0_f64;
-        for ci in problem.constraints() {
-            let ax = ci
-                .matrix()
-                .inner_product(x)
-                .map_err(at("convergence A(X)"))?;
-            primal_residual_sq = (ci.rhs() - ax).mul_add(ci.rhs() - ax, primal_residual_sq);
-            b_sq = ci.rhs().mul_add(ci.rhs(), b_sq);
-        }
-        let primal_infeasibility = primal_residual_sq.sqrt() / (1.0 + b_sq.sqrt());
+    fn relative_gap(&self) -> f64 {
+        self.complementarity / (1.0 + self.primal_obj.abs())
+    }
 
-        let rd = Self::dual_residual(problem, y, s)?;
-        let rd_norm = rd
-            .inner_product(&rd)
-            .map_err(at("convergence |Rd|"))?
-            .sqrt();
+    /// `‖R_d‖ / (1 + ‖C‖)`, in Frobenius norms.
+    fn dual_infeasibility(&self, problem: &SdpProblem) -> Result<f64, GwError> {
+        let rd_norm = self.rd.inner_product(&self.rd).map_err(at("|Rd|"))?.sqrt();
         let c_norm = problem
             .cost()
             .inner_product(problem.cost())
-            .map_err(at("convergence |C|"))?
+            .map_err(at("|C|"))?
             .sqrt();
-        let dual_infeasibility = rd_norm / (1.0 + c_norm);
+        Ok(rd_norm / (1.0 + c_norm))
+    }
+}
 
-        Ok(gap < epsilon && primal_infeasibility < epsilon && dual_infeasibility < epsilon)
+/// `‖b − A(X)‖ / (1 + ‖b‖)`.
+fn primal_infeasibility(problem: &SdpProblem, x: &DenseMatrix) -> Result<f64, GwError> {
+    let mut residual_sq = 0.0_f64;
+    let mut b_sq = 0.0_f64;
+    for ci in problem.constraints() {
+        let ax = ci.matrix().inner_product(x).map_err(at("A(X)"))?;
+        residual_sq = (ci.rhs() - ax).mul_add(ci.rhs() - ax, residual_sq);
+        b_sq = ci.rhs().mul_add(ci.rhs(), b_sq);
+    }
+    Ok(residual_sq.sqrt() / (1.0 + b_sq.sqrt()))
+}
+
+/// Computes the dual residual `R_d = C − Σ yᵢ Aᵢ − S`.
+fn dual_residual(problem: &SdpProblem, y: &[f64], s: &DenseMatrix) -> Result<DenseMatrix, GwError> {
+    let mut rd = problem.cost().clone();
+    for (ci, &yi) in problem.constraints().iter().zip(y) {
+        ci.matrix()
+            .add_scaled_to(&mut rd, -yi)
+            .map_err(at("Rd accum"))?;
+    }
+    rd.sub_assign(s).map_err(at("Rd sub S"))?;
+    Ok(rd)
+}
+
+/// What one iteration computes once and its steps share.
+struct IterationTerms {
+    /// The target `σμ`, for `μ = ⟨X, S⟩ / n`. See [`MATH.md`](./MATH.md) §3.6.
+    mu: f64,
+    /// The Nesterov-Todd scaling `W`.
+    w: DenseMatrix,
+    /// `S⁻¹`, its eigenvalues floored.
+    s_inv: DenseMatrix,
+    /// The dual residual `R_d`.
+    rd: DenseMatrix,
+}
+
+impl IterationTerms {
+    fn new(problem: &SdpProblem, iterate: &Iterate, residuals: Residuals) -> Result<Self, GwError> {
+        Ok(Self {
+            mu: CENTERING * (residuals.complementarity / problem.dimension() as f64),
+            w: nt_scaling(&iterate.x, &iterate.s)?,
+            s_inv: iterate
+                .s
+                .inverse_regularized(EIGENVALUE_FLOOR)
+                .map_err(at("S^-1"))?,
+            rd: residuals.rd,
+        })
+    }
+}
+
+/// Computes the Nesterov-Todd scaling matrix `W` satisfying `W S W = X`.
+///
+/// Algorithm (see [`MATH.md`](./MATH.md) §3.3):
+/// 1. Compute `X^{1/2}` via eigendecomposition
+/// 2. Form `P = X^{1/2} S X^{1/2}`
+/// 3. Compute `P^{-1/2}`
+/// 4. `W = X^{1/2} P^{-1/2} X^{1/2}`
+///
+/// Verification: `W S W = X^{1/2} P^{-1/2} X^{1/2} S X^{1/2} P^{-1/2} X^{1/2}`
+///             = `X^{1/2} P^{-1/2} P P^{-1/2} X^{1/2}` = `X^{1/2} I X^{1/2}` = `X`.
+fn nt_scaling(x: &DenseMatrix, s: &DenseMatrix) -> Result<DenseMatrix, GwError> {
+    let x_half = x.sqrt_spd().map_err(at("NT X^1/2"))?;
+
+    // Rounding error in X^{1/2} leaves P slightly asymmetric.
+    let mut p = x_half.congruence(s).map_err(at("NT P"))?;
+    p.symmetrize();
+    let p_inv_half = p
+        .inv_sqrt_clamped(EIGENVALUE_FLOOR)
+        .map_err(at("NT P^-1/2"))?;
+
+    let mut w = x_half.congruence(&p_inv_half).map_err(at("NT W"))?;
+    w.symmetrize();
+    Ok(w)
+}
+
+/// Computes the search direction `(ΔX, Δy, ΔS)`.
+///
+/// 1. Solve the Schur complement system `M Δy = h` by Cholesky
+/// 2. Recover `ΔS = R_d − Σ Δyᵢ Aᵢ`
+/// 3. Recover `ΔX = σμ S⁻¹ − X − W ΔS W`, symmetrized
+///
+/// See [`MATH.md`](./MATH.md) §3.4.
+fn search_direction(
+    problem: &SdpProblem,
+    iterate: &Iterate,
+    terms: &IterationTerms,
+) -> Result<Direction, GwError> {
+    let mut schur = schur_matrix(problem, &terms.w)?;
+    schur.add_to_diagonal(SCHUR_REGULARIZATION);
+    let l_schur = schur.cholesky().map_err(at("Schur Cholesky"))?;
+    let h = schur_rhs(problem, &iterate.x, terms)?;
+    let dy = DenseMatrix::cholesky_solve(&l_schur, &h).map_err(at("Schur solve"))?;
+
+    let mut ds = terms.rd.clone();
+    for (ci, &dyi) in problem.constraints().iter().zip(&dy) {
+        ci.matrix().add_scaled_to(&mut ds, -dyi).map_err(at("dS"))?;
     }
 
-    /// Computes the dual residual `R_d = C − Σ yᵢ Aᵢ − S`.
-    fn dual_residual(
-        problem: &SdpProblem,
-        y: &[f64],
-        s: &DenseMatrix,
-    ) -> Result<DenseMatrix, GwError> {
-        let mut rd = problem.cost().clone();
-        for (ci, &yi) in problem.constraints().iter().zip(y) {
-            ci.matrix()
-                .add_scaled_to(&mut rd, -yi)
-                .map_err(at("Rd accum"))?;
+    let mut dx = terms.s_inv.scale(terms.mu);
+    dx.sub_assign(&iterate.x).map_err(at("dX sub X"))?;
+    let w_ds_w = terms.w.congruence(&ds).map_err(at("dX W*dS*W"))?;
+    dx.sub_assign(&w_ds_w).map_err(at("dX sub WdSW"))?;
+    dx.symmetrize();
+
+    Ok(Direction { dx, dy, ds })
+}
+
+/// The Schur complement `M_ij = tr(Aᵢ W Aⱼ W)` of the NT-scaled KKT system
+/// `ΔX = σμ S⁻¹ − X − W ΔS W`, `ΔS = R_d − Σ Δyⱼ Aⱼ`, `tr(Aᵢ ΔX) = rₚᵢ`.
+fn schur_matrix(problem: &SdpProblem, w: &DenseMatrix) -> Result<DenseMatrix, GwError> {
+    let scaled: Vec<ScaledConstraint<'_>> = problem
+        .constraints()
+        .iter()
+        .map(|ci| ScaledConstraint::new(ci.matrix(), w))
+        .collect::<Result<_, _>>()?;
+    let m = scaled.len();
+    let mut schur = DenseMatrix::zeros(m, m);
+    for i in 0..m {
+        for j in i..m {
+            let entry = scaled[i].schur_entry(&scaled[j], w)?;
+            schur.set(i, j, entry);
+            schur.set(j, i, entry);
         }
-        rd.sub_assign(s).map_err(at("Rd sub S"))?;
-        Ok(rd)
     }
+    Ok(schur)
+}
+
+/// The Schur system's right-hand side
+/// `hᵢ = rₚᵢ − tr(Aᵢ (σμ S⁻¹ − X)) + tr(Aᵢ W R_d W)`.
+fn schur_rhs(
+    problem: &SdpProblem,
+    x: &DenseMatrix,
+    terms: &IterationTerms,
+) -> Result<Vec<f64>, GwError> {
+    let centering = terms
+        .s_inv
+        .scale(terms.mu)
+        .sub(x)
+        .map_err(at("Schur centering"))?;
+    let w_rd_w = terms.w.congruence(&terms.rd).map_err(at("Schur W*Rd*W"))?;
+    problem
+        .constraints()
+        .iter()
+        .map(|ci| {
+            let a = ci.matrix();
+            let rp = ci.rhs() - a.inner_product(x).map_err(at("Schur rp"))?;
+            let center_term = a.inner_product(&centering).map_err(at("Schur center"))?;
+            let rd_term = a.inner_product(&w_rd_w).map_err(at("Schur rd_term"))?;
+            Ok(rp - center_term + rd_term)
+        })
+        .collect()
+}
+
+/// The step `α ∈ [0, 1]` that keeps `X + α ΔX ≻ 0` and `S + α ΔS ≻ 0`,
+/// shortened by the safety factor `γ`. See [`MATH.md`](./MATH.md) §3.5.
+fn step_size(iterate: &Iterate, direction: &Direction, safety: f64) -> Result<f64, GwError> {
+    let alpha_x = max_feasible_step(&iterate.x, &direction.dx)?;
+    let alpha_s = max_feasible_step(&iterate.s, &direction.ds)?;
+    Ok((safety * alpha_x.min(alpha_s)).clamp(0.0, 1.0))
 }
 
 /// A constraint as the Schur complement needs it under NT scaling `W`.
