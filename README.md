@@ -104,10 +104,12 @@ mkdir -p results && ./scripts/benchmark.sh > results/gset.csv
 | `--ils-rounds` | 50 | Iterated local search rounds per trial |
 | `--rotation` | off | Round with Zwick's outward rotation by this angle in radians, within $[0, \pi/2]$ |
 | `--restarts` | 3 | BM random restarts |
-| `--rank` | auto | BM factorization rank (default: $\lceil\sqrt{2n}\rceil$) |
+| `--rank` | auto | BM factorization rank, within $[2, n]$ (default: $\lceil\sqrt{2n}\rceil$) |
 | `--seed` | random | RNG seed for reproducibility |
 | `--epsilon` | 1e-8 | IPM tolerance on the relative duality gap and infeasibilities (`--solver ipm` only) |
 | `--exact` | off | Also compute brute-force optimal (small graphs) |
+
+`--epsilon` applies only to the IPM, and `--rank`, `--restarts` and `--time` only to BM; giving one to the solver that does not read it, including the one `--solver auto` picks, is an error.
 
 The reported SDP bound is certified: a dual solution proves no cut exceeds it, even when the solver stopped short of the SDP's optimum. BM certifies graphs of up to 3,000 vertices; past that the dense eigenvalue the certificate needs is too slow, so it prints its relaxation value, which is not a bound, and no approximation ratio.
 

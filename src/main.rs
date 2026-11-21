@@ -8,7 +8,8 @@ use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use clap::Parser;
+use clap::parser::ValueSource;
+use clap::{ArgMatches, CommandFactory, FromArgMatches, Parser};
 use maxcut_sdp::GwError;
 use maxcut_sdp::graph::Graph;
 use maxcut_sdp::maxcut::exact::exact_maxcut;
@@ -121,12 +122,72 @@ const fn backend_name(kind: BackendKind) -> &'static str {
 }
 
 fn main() {
-    let cli = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    let solver_flags = given_solver_flags(&matches);
 
-    if let Err(e) = run(&cli) {
+    if let Err(e) = run(&cli, &solver_flags) {
         eprintln!("error: {e}");
-        std::process::exit(1);
+        std::process::exit(e.exit_code());
     }
+}
+
+/// A flag only one kind of solver reads.
+#[derive(Debug, PartialEq, Eq)]
+struct SolverFlag {
+    /// The argument's id in clap, its field name.
+    id: &'static str,
+    /// The flag as typed.
+    flag: &'static str,
+    solver: BackendKind,
+}
+
+const SOLVER_FLAGS: [SolverFlag; 4] = [
+    SolverFlag {
+        id: "epsilon",
+        flag: "--epsilon",
+        solver: BackendKind::Ipm,
+    },
+    SolverFlag {
+        id: "rank",
+        flag: "--rank",
+        solver: BackendKind::Bm,
+    },
+    SolverFlag {
+        id: "restarts",
+        flag: "--restarts",
+        solver: BackendKind::Bm,
+    },
+    SolverFlag {
+        id: "time_limit_secs",
+        flag: "--time",
+        solver: BackendKind::Bm,
+    },
+];
+
+/// The solver-specific flags given on the command line, not defaulted.
+fn given_solver_flags(matches: &ArgMatches) -> Vec<&'static SolverFlag> {
+    SOLVER_FLAGS
+        .iter()
+        .filter(|flag| matches.value_source(flag.id) == Some(ValueSource::CommandLine))
+        .collect()
+}
+
+/// Refuses a flag that the solver this run uses would ignore.
+fn check_flags_apply(
+    flags: &[&'static SolverFlag],
+    choice: SolverChoice,
+    kind: BackendKind,
+    vertices: usize,
+) -> Result<(), CliError> {
+    let Some(flag) = flags.iter().find(|flag| flag.solver != kind) else {
+        return Ok(());
+    };
+    Err(CliError::FlagNotForSolver {
+        flag,
+        kind,
+        auto_vertices: matches!(choice, SolverChoice::Auto).then_some(vertices),
+    })
 }
 
 /// The most a reported cut may differ from the cut its partition gives.
@@ -140,8 +201,25 @@ enum CliError {
         path: PathBuf,
         source: std::io::Error,
     },
+    /// A flag was given that the chosen solver does not read.
+    FlagNotForSolver {
+        flag: &'static SolverFlag,
+        kind: BackendKind,
+        /// The vertex count `--solver auto` chose `kind` for, if it did.
+        auto_vertices: Option<usize>,
+    },
     /// Parsing or solving failed.
     Solver(GwError),
+}
+
+impl CliError {
+    /// The exit status: 2 for a misused flag, like clap's, 1 otherwise.
+    const fn exit_code(&self) -> i32 {
+        match self {
+            Self::FlagNotForSolver { .. } => 2,
+            Self::Read { .. } | Self::Solver(_) => 1,
+        }
+    }
 }
 
 impl From<GwError> for CliError {
@@ -154,12 +232,29 @@ impl fmt::Display for CliError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Read { path, source } => write!(f, "failed to read {}: {source}", path.display()),
+            Self::FlagNotForSolver {
+                flag,
+                kind,
+                auto_vertices,
+            } => {
+                write!(
+                    f,
+                    "{} applies only to --solver {}, but this run uses {}",
+                    flag.flag,
+                    backend_name(flag.solver),
+                    backend_name(*kind)
+                )?;
+                if let Some(n) = auto_vertices {
+                    write!(f, ", which --solver auto picks for {n} vertices")?;
+                }
+                Ok(())
+            }
             Self::Solver(error) => write!(f, "{error}"),
         }
     }
 }
 
-fn run(cli: &Cli) -> Result<(), CliError> {
+fn run(cli: &Cli, solver_flags: &[&'static SolverFlag]) -> Result<(), CliError> {
     let graph = read_graph(cli)?;
     println!(
         "Graph: {} vertices, {} edges, total weight {:.3}",
@@ -168,6 +263,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         graph.total_weight()
     );
     let kind = cli.solver.kind(graph.num_vertices());
+    check_flags_apply(solver_flags, cli.solver, kind, graph.num_vertices())?;
     println!("Solver:         {}", backend_name(kind));
 
     let start = Instant::now();
@@ -355,4 +451,67 @@ fn format_ratio(ratio: Option<f64>) -> String {
         || "undefined (the bound is 0)".to_string(),
         |r| format!("{r:.6}"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flag(id: &str) -> &'static SolverFlag {
+        SOLVER_FLAGS
+            .iter()
+            .find(|flag| flag.id == id)
+            .unwrap_or_else(|| panic!("no flag {id}"))
+    }
+
+    #[test]
+    fn every_solver_flag_names_a_cli_argument() {
+        let command = Cli::command();
+        for flag in &SOLVER_FLAGS {
+            let argument = command.get_arguments().find(|a| a.get_id() == flag.id);
+            let long = argument
+                .and_then(|a| a.get_long())
+                .map(|long| format!("--{long}"));
+            assert_eq!(long.as_deref(), Some(flag.flag), "{}", flag.id);
+        }
+    }
+
+    #[test]
+    fn flags_for_the_solver_in_use_are_accepted() {
+        let flags = [flag("rank"), flag("restarts"), flag("time_limit_secs")];
+
+        let checked = check_flags_apply(&flags, SolverChoice::Bm, BackendKind::Bm, 500);
+
+        assert!(checked.is_ok(), "{checked:?}");
+    }
+
+    #[test]
+    fn a_bm_flag_is_refused_when_auto_picks_the_ipm() {
+        let checked = check_flags_apply(
+            &[flag("time_limit_secs")],
+            SolverChoice::Auto,
+            BackendKind::Ipm,
+            40,
+        );
+
+        let message = checked.map_err(|e| e.to_string());
+        assert_eq!(
+            message,
+            Err(
+                "--time applies only to --solver bm, but this run uses ipm, which --solver auto picks for 40 vertices"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn the_ipm_tolerance_is_refused_with_bm() {
+        let checked = check_flags_apply(&[flag("epsilon")], SolverChoice::Bm, BackendKind::Bm, 40);
+
+        let message = checked.map_err(|e| e.to_string());
+        assert_eq!(
+            message,
+            Err("--epsilon applies only to --solver ipm, but this run uses bm".to_string())
+        );
+    }
 }
