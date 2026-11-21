@@ -489,7 +489,7 @@ is not too loose on this instance.
 |------|--------|----------|
 | 1. Build graph Laplacian $L$ | `graph.rs` | `Graph::laplacian()` |
 | 2. Formulate SDP: $C = -\frac{1}{4}L$, constraints $X_{ii} = 1$ | `sdp/mod.rs` | `SdpProblem::maxcut_relaxation()` |
-| 3. Solve SDP via IPM, or via Burer-Monteiro for large graphs | `sdp/solver.rs`, `sdp/solver_bm.rs` | `Solver::solve()`, `BmSolver::solve_maxcut()` |
+| 3. Solve SDP via IPM, or via Burer-Monteiro for large graphs | `sdp/ipm.rs`, `sdp/bm.rs` | `IpmSolver::solve()`, `BmSolver::solve_maxcut()` |
 | 4. Certify the upper bound from a dual solution | `maxcut/mod.rs` | `certified_bound()` |
 | 5. Extract vectors via Cholesky: $X^{*} = V^\top V$ (IPM only) | `maxcut/rounding.rs` | `extract_vectors()` |
 | 6. Hyperplane or outward rotation rounding ($k$ trials) | `maxcut/rounding.rs` | `multi_round()`, `multi_round_with_pool()` |

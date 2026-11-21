@@ -5,12 +5,12 @@ mod common;
 use common::{cycle, triangle};
 use maxcut_sdp::GwError;
 use maxcut_sdp::graph::Graph;
+use maxcut_sdp::sdp::ipm::{IpmConfig, IpmSolver};
 use maxcut_sdp::sdp::linalg::DenseMatrix;
-use maxcut_sdp::sdp::solver::{Solver, SolverConfig};
 use maxcut_sdp::sdp::{ConstraintMatrix, SdpProblem, SdpSolution};
 
 fn solve(problem: &SdpProblem) -> SdpSolution {
-    Solver::new(SolverConfig::default())
+    IpmSolver::new(IpmConfig::default())
         .solve(problem)
         .unwrap_or_else(|e| panic!("solver failed: {e}"))
 }
@@ -79,9 +79,9 @@ fn ipm_reaches_the_sdp_value_of_a_61_cycle() {
 #[test]
 fn stopping_before_convergence_is_an_error() {
     let problem = maxcut_relaxation(&cycle(5));
-    let solver = Solver::new(SolverConfig {
+    let solver = IpmSolver::new(IpmConfig {
         max_iterations: 1,
-        ..SolverConfig::default()
+        ..IpmConfig::default()
     });
 
     let result = solver.solve(&problem);

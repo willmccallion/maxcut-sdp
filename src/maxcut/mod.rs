@@ -24,9 +24,9 @@ use crate::GwError;
 use crate::graph::Graph;
 use crate::maxcut::rounding::{Rounding, TrialPlan};
 use crate::sdp::SdpProblem;
+use crate::sdp::bm::{BmSolver, BmSolverConfig};
+use crate::sdp::ipm::{IpmConfig, IpmSolver};
 use crate::sdp::linalg::{DenseMatrix, col, dot};
-use crate::sdp::solver::{Solver, SolverConfig};
-use crate::sdp::solver_bm::{BmSolver, BmSolverConfig};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
@@ -165,7 +165,7 @@ pub struct GwConfig {
     /// How each trial rounds the SDP vectors.
     pub rounding: Rounding,
     /// Configuration for the underlying SDP solver.
-    pub solver_config: SolverConfig,
+    pub solver_config: IpmConfig,
     /// Optional RNG seed for reproducibility.
     pub seed: Option<u64>,
 }
@@ -176,7 +176,7 @@ impl Default for GwConfig {
             num_trials: DEFAULT_TRIALS,
             ils_rounds: 50,
             rounding: Rounding::default(),
-            solver_config: SolverConfig::default(),
+            solver_config: IpmConfig::default(),
             seed: None,
         }
     }
@@ -234,7 +234,7 @@ pub fn gw_maxcut(graph: &Graph, config: &GwConfig) -> Result<MaxCutResult, GwErr
     let problem = SdpProblem::maxcut_relaxation(graph)?;
 
     // 2. Solve SDP.
-    let solver = Solver::new(config.solver_config.clone());
+    let solver = IpmSolver::new(config.solver_config.clone());
     let solution = solver.solve(&problem)?;
 
     // The Max-Cut SDP maximizes (1/4) tr(LX) = -tr(CX). The converged dual
@@ -480,7 +480,7 @@ mod tests {
     fn the_ipm_bound_is_certified_and_at_least_the_optimum() {
         let graph = five_cycle();
         let problem = SdpProblem::maxcut_relaxation(&graph).unwrap_or_else(|e| panic!("{e}"));
-        let solution = Solver::new(SolverConfig::default())
+        let solution = IpmSolver::new(IpmConfig::default())
             .solve(&problem)
             .unwrap_or_else(|e| panic!("{e}"));
 

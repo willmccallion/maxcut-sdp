@@ -11,9 +11,9 @@ use common::{complete, cycle, sparse_random_graph};
 use criterion::{Criterion, criterion_group, criterion_main};
 use maxcut_sdp::maxcut::{GwBmConfig, gw_maxcut_bm};
 use maxcut_sdp::sdp::SdpProblem;
+use maxcut_sdp::sdp::bm::{BmSolver, BmSolverConfig};
+use maxcut_sdp::sdp::ipm::{IpmConfig, IpmSolver};
 use maxcut_sdp::sdp::linalg::DenseMatrix;
-use maxcut_sdp::sdp::solver::{Solver, SolverConfig};
-use maxcut_sdp::sdp::solver_bm::{BmSolver, BmSolverConfig};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
@@ -73,7 +73,7 @@ fn bench_min_eigenvalue(c: &mut Criterion) {
 fn bench_ipm(c: &mut Criterion) {
     let mut group = c.benchmark_group("ipm_solve");
     let _ = group.sample_size(SLOW_SAMPLES);
-    let solver = Solver::new(SolverConfig::default());
+    let solver = IpmSolver::new(IpmConfig::default());
     for n in [21, 51] {
         let problem = SdpProblem::maxcut_relaxation(&cycle(n))
             .unwrap_or_else(|e| panic!("relaxation failed: {e}"));

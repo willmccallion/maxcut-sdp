@@ -9,7 +9,7 @@ use std::process::Command;
 
 use common::erdos_renyi;
 use maxcut_sdp::sdp::SdpProblem;
-use maxcut_sdp::sdp::solver::{Solver, SolverConfig};
+use maxcut_sdp::sdp::ipm::{IpmConfig, IpmSolver};
 
 const PROBE_N: &str = "MAXCUT_IPM_MEMORY_PROBE_N";
 
@@ -46,11 +46,11 @@ fn ipm_memory_probe() {
         };
         // Memory peaks within the first iterations, so a few suffice; the
         // unconverged result is not needed.
-        let config = SolverConfig {
+        let config = IpmConfig {
             max_iterations: PROBE_ITERATIONS,
-            ..SolverConfig::default()
+            ..IpmConfig::default()
         };
-        let _ = Solver::new(config).solve(&problem);
+        let _ = IpmSolver::new(config).solve(&problem);
     }
     println!("PEAK_RSS_KIB={}", peak_rss_kib());
 }

@@ -2,7 +2,7 @@
 
 Mathematical reference for the `sdp` module. This document derives the primal-dual interior
 point method step by step, from the standard form SDP through Newton direction computation
-and convergence analysis. It serves as the implementation guide for `solver.rs` and `linalg.rs`.
+and convergence analysis. It serves as the implementation guide for `ipm.rs` and `linalg.rs`.
 
 ---
 

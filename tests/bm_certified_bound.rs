@@ -10,7 +10,7 @@ use maxcut_sdp::graph::Graph;
 use maxcut_sdp::maxcut::{
     GwBmConfig, GwConfig, MAX_CERTIFIED_VERTICES, SdpBound, gw_maxcut, gw_maxcut_bm,
 };
-use maxcut_sdp::sdp::solver_bm::BmSolverConfig;
+use maxcut_sdp::sdp::bm::BmSolverConfig;
 
 /// The SDP's value, from the IPM's certified bound.
 fn sdp_value(graph: &Graph) -> f64 {

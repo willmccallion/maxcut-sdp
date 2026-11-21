@@ -14,9 +14,9 @@
 //!
 //! See [`MATH.md`](./MATH.md) §1–§2 for definitions and duality theory.
 
+pub mod bm;
+pub mod ipm;
 pub mod linalg;
-pub mod solver;
-pub mod solver_bm;
 
 use crate::GwError;
 use crate::graph::Graph;

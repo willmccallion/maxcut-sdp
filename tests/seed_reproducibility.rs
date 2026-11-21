@@ -4,7 +4,7 @@ mod common;
 
 use common::sparse_random_graph;
 use maxcut_sdp::maxcut::{GwBmConfig, SdpBound, gw_maxcut_bm};
-use maxcut_sdp::sdp::solver_bm::{BmSolver, BmSolverConfig};
+use maxcut_sdp::sdp::bm::{BmSolver, BmSolverConfig};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::num::NonZeroUsize;
