@@ -9,11 +9,12 @@ use std::time::{Duration, Instant};
 
 use clap::Parser;
 use maxcut_sdp::GwError;
+use maxcut_sdp::graph::Graph;
 use maxcut_sdp::maxcut::exact::exact_maxcut;
 use maxcut_sdp::maxcut::rounding::{RotationAngle, Rounding, TrialPlan};
 use maxcut_sdp::maxcut::{
-    Backend, BackendKind, BmConfig, DEFAULT_ILS_ROUNDS, DEFAULT_RESTARTS, DEFAULT_TRIALS, GwConfig,
-    MAX_CERTIFIED_VERTICES, MaxCutResult, Progress, SdpBound, cut_ratio, gw_maxcut,
+    Backend, BackendKind, BmConfig, Cut, DEFAULT_ILS_ROUNDS, DEFAULT_RESTARTS, DEFAULT_TRIALS,
+    GwConfig, MAX_CERTIFIED_VERTICES, MaxCutResult, Progress, SdpBound, cut_ratio, gw_maxcut,
 };
 use maxcut_sdp::parser::{parse_auto, parse_biqmac, parse_dimacs};
 use maxcut_sdp::sdp::bm::{BmProgress, BmSolverConfig};
@@ -127,27 +128,62 @@ fn main() {
     }
 }
 
+/// The most a reported cut may differ from the cut its partition gives.
+const VERIFICATION_TOLERANCE: f64 = 1e-6;
+
 fn run(cli: &Cli) -> Result<(), GwError> {
-    let input = std::fs::read_to_string(&cli.input)
-        .map_err(|e| GwError::ParseError(format!("failed to read {}: {e}", cli.input.display())))?;
-
-    let graph = match cli.format {
-        Some(InputFormat::Biqmac) => parse_biqmac(&input)?,
-        Some(InputFormat::Dimacs) => parse_dimacs(&input)?,
-        None => parse_auto(&input)?,
-    };
-
+    let graph = read_graph(cli)?;
     println!(
         "Graph: {} vertices, {} edges, total weight {:.3}",
         graph.num_vertices(),
         graph.num_edges(),
         graph.total_weight()
     );
-
     let kind = cli.solver.kind(graph.num_vertices());
     println!("Solver:         {}", backend_name(kind));
 
-    let backend = match kind {
+    let start = Instant::now();
+    let max_cut = solve(cli, kind, &graph)?;
+    let elapsed = start.elapsed();
+    verify_cut(&graph, &max_cut.cut)?;
+    print_result(&graph, &max_cut, elapsed);
+    if cli.exact {
+        print_exact_comparison(&graph, &max_cut.cut);
+    }
+    Ok(())
+}
+
+fn read_graph(cli: &Cli) -> Result<Graph, GwError> {
+    let input = std::fs::read_to_string(&cli.input)
+        .map_err(|e| GwError::ParseError(format!("failed to read {}: {e}", cli.input.display())))?;
+    match cli.format {
+        Some(InputFormat::Biqmac) => parse_biqmac(&input),
+        Some(InputFormat::Dimacs) => parse_dimacs(&input),
+        None => parse_auto(&input),
+    }
+}
+
+/// Runs GW on `graph` with the `kind` of solver and the options `cli` gives.
+fn solve(cli: &Cli, kind: BackendKind, graph: &Graph) -> Result<MaxCutResult, GwError> {
+    let config = GwConfig {
+        plan: TrialPlan {
+            num_trials: cli.trials,
+            ils_rounds: cli.ils_rounds,
+            rounding: cli
+                .rotation
+                .map_or(Rounding::Hyperplane, Rounding::OutwardRotation),
+        },
+        seed: cli.seed,
+        backend: backend(cli, kind),
+    };
+    let mut best_cut = None;
+    gw_maxcut(graph, &config, |progress| {
+        report_progress(progress, &mut best_cut);
+    })
+}
+
+fn backend(cli: &Cli, kind: BackendKind) -> Backend {
+    match kind {
         BackendKind::Ipm => Backend::Ipm(IpmConfig {
             epsilon: cli.epsilon,
             ..IpmConfig::default()
@@ -160,71 +196,51 @@ fn run(cli: &Cli) -> Result<(), GwError> {
             num_restarts: cli.restarts,
             time_limit: cli.time.map(Duration::from_secs),
         }),
-    };
-    let config = GwConfig {
-        plan: TrialPlan {
-            num_trials: cli.trials,
-            ils_rounds: cli.ils_rounds,
-            rounding: cli
-                .rotation
-                .map_or(Rounding::Hyperplane, Rounding::OutwardRotation),
-        },
-        seed: cli.seed,
-        backend,
-    };
-    let start = Instant::now();
-    let mut best_cut = None;
-    let result = gw_maxcut(&graph, &config, |progress| {
-        report_progress(progress, &mut best_cut);
-    })?;
-    let elapsed = start.elapsed();
+    }
+}
 
-    // Verify: independently recompute the cut value from the partition.
-    let verified_cut = graph.cut_value(&result.cut.partition);
-    if (verified_cut - result.cut.cut_value).abs() > 1e-6 {
+/// Checks the reported cut against the cut its partition gives.
+fn verify_cut(graph: &Graph, cut: &Cut) -> Result<(), GwError> {
+    let verified_cut = graph.cut_value(&cut.partition);
+    if (verified_cut - cut.cut_value).abs() > VERIFICATION_TOLERANCE {
         return Err(GwError::SolverFailed(format!(
             "VERIFICATION FAILED: reported cut {:.6} but recomputed cut {verified_cut:.6}",
-            result.cut.cut_value
+            cut.cut_value
         )));
     }
+    Ok(())
+}
 
+fn print_result(graph: &Graph, max_cut: &MaxCutResult, elapsed: Duration) {
     println!("\n--- Goemans-Williamson Result ---");
-    println!("{}", describe_bound(result.sdp_bound));
-    println!("GW cut value:   {:.6} (verified)", result.cut.cut_value);
-    println!("Approx ratio:   {}", describe_ratio(&result));
-    println!("Rounding trials: {}", result.num_trials);
+    println!("{}", describe_bound(max_cut.sdp_bound));
+    println!("GW cut value:   {:.6} (verified)", max_cut.cut.cut_value);
+    println!("Approx ratio:   {}", describe_ratio(max_cut));
+    println!("Rounding trials: {}", max_cut.num_trials);
     println!("Total time:     {elapsed:.3?}");
 
-    let s_count = result.cut.partition.iter().filter(|&&b| b).count();
+    let s_count = max_cut.cut.partition.iter().filter(|&&b| b).count();
     println!(
         "Partition:      |S| = {}, |S̄| = {}",
         s_count,
         graph.num_vertices() - s_count
     );
+}
 
-    // Optionally run exact solver.
-    if cli.exact {
-        let exact_start = Instant::now();
-        match exact_maxcut(&graph) {
-            Ok(exact_result) => {
-                let exact_elapsed = exact_start.elapsed();
-                println!("\n--- Exact Max-Cut ---");
-                println!("Optimal cut:    {:.6}", exact_result.cut_value);
-                let gw_over_opt = cut_ratio(
-                    result.cut.cut_value,
-                    exact_result.cut_value,
-                    graph.total_abs_weight(),
-                );
-                println!("GW / OPT:       {}", format_ratio(gw_over_opt));
-                println!("Time:           {exact_elapsed:.3?}");
-            }
-            Err(e) => {
-                eprintln!("Exact solver skipped: {e}");
-            }
+/// Prints the exact maximum cut beside the GW `cut`, or why it was skipped.
+fn print_exact_comparison(graph: &Graph, cut: &Cut) {
+    let start = Instant::now();
+    match exact_maxcut(graph) {
+        Ok(optimum) => {
+            let elapsed = start.elapsed();
+            println!("\n--- Exact Max-Cut ---");
+            println!("Optimal cut:    {:.6}", optimum.cut_value);
+            let gw_over_opt = cut_ratio(cut.cut_value, optimum.cut_value, graph.total_abs_weight());
+            println!("GW / OPT:       {}", format_ratio(gw_over_opt));
+            println!("Time:           {elapsed:.3?}");
         }
+        Err(e) => eprintln!("Exact solver skipped: {e}"),
     }
-
-    Ok(())
 }
 
 /// Prints a run's progress to stderr. `best_cut` is the best cut of the
@@ -295,9 +311,9 @@ fn describe_bound(bound: SdpBound) -> String {
 }
 
 /// The approximation ratio, or why there is none.
-fn describe_ratio(result: &MaxCutResult) -> String {
-    match result.sdp_bound {
-        SdpBound::Certified(_) => format_ratio(result.approximation_ratio),
+fn describe_ratio(max_cut: &MaxCutResult) -> String {
+    match max_cut.sdp_bound {
+        SdpBound::Certified(_) => format_ratio(max_cut.approximation_ratio),
         SdpBound::Relaxation(_) => "none without a certified bound".to_string(),
     }
 }
