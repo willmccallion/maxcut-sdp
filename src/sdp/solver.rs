@@ -188,13 +188,10 @@ impl Solver {
         // P = X^{1/2} S X^{1/2} — should be SPD, but floating-point
         // errors in the eigendecomposition can introduce tiny negative
         // eigenvalues. We symmetrize and clamp.
-        let tmp = x_half
-            .mul(s)
-            .map_err(|e| GwError::SolverFailed(format!("NT X^1/2 S: {e}")))?;
-        let mut p = tmp
-            .mul(&x_half)
+        let mut p = x_half
+            .congruence(s)
             .map_err(|e| GwError::SolverFailed(format!("NT P: {e}")))?;
-        symmetrize(&mut p);
+        p.symmetrize();
 
         // P^{-1/2} with tolerance-aware clamping of eigenvalues.
         let p_inv_half = p
@@ -205,13 +202,10 @@ impl Solver {
             .map_err(|e| GwError::SolverFailed(format!("NT P^-1/2: {e}")))?;
 
         // W = X^{1/2} P^{-1/2} X^{1/2}
-        let tmp2 = x_half
-            .mul(&p_inv_half)
-            .map_err(|e| GwError::SolverFailed(format!("NT W tmp: {e}")))?;
-        let mut w = tmp2
-            .mul(&x_half)
+        let mut w = x_half
+            .congruence(&p_inv_half)
             .map_err(|e| GwError::SolverFailed(format!("NT W: {e}")))?;
-        symmetrize(&mut w);
+        w.symmetrize();
 
         Ok(w)
     }
@@ -267,12 +261,8 @@ impl Solver {
 
         let rd = Self::dual_residual(problem, y, s)?;
 
-        // Compute W R_d W.
-        let w_rd = w
-            .mul(&rd)
-            .map_err(|e| GwError::SolverFailed(format!("Schur W*Rd: {e}")))?;
-        let w_rd_w = w_rd
-            .mul(w)
+        let w_rd_w = w
+            .congruence(&rd)
             .map_err(|e| GwError::SolverFailed(format!("Schur W*Rd*W: {e}")))?;
 
         let mut h = vec![0.0; m];
@@ -347,17 +337,14 @@ impl Solver {
         dx.sub_assign(x)
             .map_err(|e| GwError::SolverFailed(format!("dx sub X: {e}")))?;
 
-        let w_ds = w
-            .mul(&ds)
-            .map_err(|e| GwError::SolverFailed(format!("dx W*dS: {e}")))?;
-        let w_ds_w = w_ds
-            .mul(w)
+        let w_ds_w = w
+            .congruence(&ds)
             .map_err(|e| GwError::SolverFailed(format!("dx W*dS*W: {e}")))?;
         dx.sub_assign(&w_ds_w)
             .map_err(|e| GwError::SolverFailed(format!("dx sub WdSW: {e}")))?;
 
         // Symmetrize ΔX to correct floating-point asymmetry.
-        symmetrize(&mut dx);
+        dx.symmetrize();
 
         Ok((dx, dy, ds))
     }
@@ -475,8 +462,7 @@ impl<'a> ScaledConstraint<'a> {
             ConstraintMatrix::DiagonalUnit(k) => Ok(Self::Diagonal(*k)),
             ConstraintMatrix::Dense(a) => {
                 let waw = w
-                    .mul(a)
-                    .and_then(|wa| wa.mul(w))
+                    .congruence(a)
                     .map_err(|e| GwError::SolverFailed(format!("Schur W*A*W: {e}")))?;
                 Ok(Self::Dense { a, waw })
             }
@@ -514,14 +500,10 @@ fn max_feasible_step(a: &DenseMatrix, da: &DenseMatrix) -> Result<f64, GwError> 
         })
         .map_err(|e| GwError::SolverFailed(format!("step A^-1/2: {e}")))?;
 
-    // Form A^{-1/2} DA A^{-1/2}.
-    let tmp = a_inv_half
-        .mul(da)
-        .map_err(|e| GwError::SolverFailed(format!("step mul1: {e}")))?;
-    let mut scaled = tmp
-        .mul(&a_inv_half)
-        .map_err(|e| GwError::SolverFailed(format!("step mul2: {e}")))?;
-    symmetrize(&mut scaled);
+    let mut scaled = a_inv_half
+        .congruence(da)
+        .map_err(|e| GwError::SolverFailed(format!("step A^-1/2 dA A^-1/2: {e}")))?;
+    scaled.symmetrize();
 
     let min_eig = scaled
         .min_eigenvalue()
@@ -531,20 +513,5 @@ fn max_feasible_step(a: &DenseMatrix, da: &DenseMatrix) -> Result<f64, GwError> 
         Ok(1e10) // DA is PSD relative to A, step is essentially unbounded.
     } else {
         Ok(-1.0 / min_eig)
-    }
-}
-
-/// Forces a matrix to be exactly symmetric: `A <- (A + A^T) / 2`.
-fn symmetrize(a: &mut DenseMatrix) {
-    let n = a.rows();
-    let d = a.data_mut();
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let ij = i + j * n;
-            let ji = j + i * n;
-            let avg = f64::midpoint(d[ij], d[ji]);
-            d[ij] = avg;
-            d[ji] = avg;
-        }
     }
 }
