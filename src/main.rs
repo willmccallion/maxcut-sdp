@@ -55,8 +55,8 @@ struct Cli {
     rank: Option<usize>,
 
     /// Number of BM random restarts (each rounded independently).
-    #[arg(long, default_value_t = 3)]
-    restarts: usize,
+    #[arg(long, default_value_t = maxcut_sdp::maxcut::DEFAULT_RESTARTS)]
+    restarts: NonZeroUsize,
 
     /// Number of iterated local search rounds per rounding trial.
     #[arg(long, default_value_t = 50)]
@@ -185,9 +185,9 @@ fn run(cli: &Cli) -> Result<(), GwError> {
                 rounding,
                 solver_config: BmSolverConfig {
                     rank: cli.rank,
-                    num_restarts: cli.restarts,
                     ..BmSolverConfig::default()
                 },
+                num_restarts: cli.restarts,
                 seed: cli.seed,
                 time_limit: cli.time.map(Duration::from_secs),
             };

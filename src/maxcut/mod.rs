@@ -156,6 +156,12 @@ pub const DEFAULT_TRIALS: NonZeroUsize = match NonZeroUsize::new(100) {
     None => NonZeroUsize::MIN,
 };
 
+/// BM restarts the configurations run by default.
+pub const DEFAULT_RESTARTS: NonZeroUsize = match NonZeroUsize::new(3) {
+    Some(restarts) => restarts,
+    None => NonZeroUsize::MIN,
+};
+
 /// Configuration for the GW algorithm.
 #[derive(Debug, Clone)]
 pub struct GwConfig {
@@ -194,6 +200,8 @@ pub struct GwBmConfig {
     pub rounding: Rounding,
     /// Configuration for the BM solver.
     pub solver_config: BmSolverConfig,
+    /// BM solves from independent random starts, each rounded separately.
+    pub num_restarts: NonZeroUsize,
     /// Optional RNG seed for reproducibility (used for both solver and rounding).
     pub seed: Option<u64>,
     /// Optional time budget. When set, a restart after the first starts only
@@ -211,6 +219,7 @@ impl Default for GwBmConfig {
             ils_rounds: 50,
             rounding: Rounding::default(),
             solver_config: BmSolverConfig::default(),
+            num_restarts: DEFAULT_RESTARTS,
             seed: None,
             time_limit: None,
         }
@@ -284,11 +293,7 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
     // Run each restart independently: solve BM, then round from those vectors.
     // Different restarts produce different vector geometries, giving the rounding
     // more diverse starting points.
-    let single_restart_config = BmSolverConfig {
-        num_restarts: 1,
-        ..config.solver_config.clone()
-    };
-    let solver = BmSolver::new(single_restart_config);
+    let solver = BmSolver::new(config.solver_config.clone());
 
     let pool_size = 8;
     let start = Instant::now();
@@ -302,7 +307,7 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
 
     let deadline = config.time_limit.map(|limit| start + limit);
     let mut last_restart = Duration::ZERO;
-    let num_restarts = config.solver_config.num_restarts.max(1);
+    let num_restarts = config.num_restarts.get();
     for restart in 0..num_restarts {
         let restart_start = Instant::now();
         if restart > 0 && !fits_before(deadline, restart_start, last_restart) {

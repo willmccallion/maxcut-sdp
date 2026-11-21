@@ -67,6 +67,18 @@ fn zero_trials_are_refused_without_crashing() {
 }
 
 #[test]
+fn zero_restarts_are_refused() {
+    let output = run(&cycle_file(5), &["--solver", "bm", "--restarts", "0"]);
+
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("--restarts"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
 fn a_rotation_past_a_right_angle_is_refused() {
     let output = run(&cycle_file(5), &["--rotation", "2.0"]);
 

@@ -63,6 +63,7 @@ fn seeded_bm_runs() -> &'static [(Vec<bool>, f64, SdpBound)] {
         let config = GwBmConfig {
             num_trials: NonZeroUsize::MIN,
             ils_rounds: 0,
+            num_restarts: NonZeroUsize::MIN,
             seed: Some(9),
             ..GwBmConfig::default()
         };

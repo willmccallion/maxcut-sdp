@@ -22,6 +22,7 @@ fn bm_five_cycle_gw_guarantee() {
             rank: Some(4),
             ..BmSolverConfig::default()
         },
+        num_restarts: NonZeroUsize::MIN,
         seed: Some(42),
         time_limit: None,
     };
@@ -50,6 +51,7 @@ fn bm_k4_gw_guarantee() {
             rank: Some(3),
             ..BmSolverConfig::default()
         },
+        num_restarts: NonZeroUsize::MIN,
         seed: Some(7),
         time_limit: None,
     };
