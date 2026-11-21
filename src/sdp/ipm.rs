@@ -75,9 +75,10 @@ impl IpmSolver {
     ///
     /// # Errors
     ///
-    /// Returns [`GwError::SolverFailed`] on a numerical failure (e.g., Cholesky
-    /// failure during iteration) or when `config.max_iterations` pass without
-    /// converging.
+    /// Returns [`GwError::SolverStep`], naming the step and keeping its cause,
+    /// on a numerical failure such as a Schur complement that is not positive
+    /// definite, and [`GwError::SolverFailed`] when `config.max_iterations`
+    /// pass without converging.
     pub fn solve(&self, problem: &SdpProblem) -> Result<SdpSolution, GwError> {
         let n = problem.dimension();
         let m = problem.constraints().len();
@@ -107,19 +108,14 @@ impl IpmSolver {
             // Update iterates.
             let scaled_dx = dx.scale(alpha);
             let scaled_ds = ds.scale(alpha);
-            x.add_assign(&scaled_dx)
-                .map_err(|e| GwError::SolverFailed(format!("X update: {e}")))?;
-            s.add_assign(&scaled_ds)
-                .map_err(|e| GwError::SolverFailed(format!("S update: {e}")))?;
+            x.add_assign(&scaled_dx).map_err(at("X update"))?;
+            s.add_assign(&scaled_ds).map_err(at("S update"))?;
             for i in 0..m {
                 y[i] = alpha.mul_add(dy[i], y[i]);
             }
         }
 
-        let primal_obj = problem
-            .cost()
-            .inner_product(&x)
-            .map_err(|e| GwError::SolverFailed(format!("primal obj: {e}")))?;
+        let primal_obj = problem.cost().inner_product(&x).map_err(at("primal obj"))?;
         let dual_obj: f64 = problem
             .constraints()
             .iter()
@@ -161,9 +157,7 @@ impl IpmSolver {
         // S = C - Σ y_i A_i = C (since y = 0).
         // If C is not PD, shift: S = C + α I to ensure S ≻ 0.
         let mut s = problem.cost().clone();
-        let min_eig = s
-            .min_eigenvalue()
-            .map_err(|e| GwError::SolverFailed(format!("init eigenvalue: {e}")))?;
+        let min_eig = s.min_eigenvalue().map_err(at("init eigenvalue"))?;
         if min_eig <= 0.0 {
             s.add_to_diagonal(-min_eig + 1.0);
         }
@@ -186,27 +180,21 @@ impl IpmSolver {
     ///
     /// Returns an error if `X` or `S` is not positive definite.
     fn compute_nt_scaling(x: &DenseMatrix, s: &DenseMatrix) -> Result<DenseMatrix, GwError> {
-        let x_half = x
-            .sqrt_spd()
-            .map_err(|e| GwError::SolverFailed(format!("NT X^1/2: {e}")))?;
+        let x_half = x.sqrt_spd().map_err(at("NT X^1/2"))?;
 
         // P = X^{1/2} S X^{1/2} — should be SPD, but floating-point
         // errors in the eigendecomposition can introduce tiny negative
         // eigenvalues. We symmetrize and clamp.
-        let mut p = x_half
-            .congruence(s)
-            .map_err(|e| GwError::SolverFailed(format!("NT P: {e}")))?;
+        let mut p = x_half.congruence(s).map_err(at("NT P"))?;
         p.symmetrize();
 
         // P^{-1/2} with tolerance-aware clamping of eigenvalues.
         let p_inv_half = p
             .inv_sqrt_clamped(EIGENVALUE_FLOOR)
-            .map_err(|e| GwError::SolverFailed(format!("NT P^-1/2: {e}")))?;
+            .map_err(at("NT P^-1/2"))?;
 
         // W = X^{1/2} P^{-1/2} X^{1/2}
-        let mut w = x_half
-            .congruence(&p_inv_half)
-            .map_err(|e| GwError::SolverFailed(format!("NT W: {e}")))?;
+        let mut w = x_half.congruence(&p_inv_half).map_err(at("NT W"))?;
         w.symmetrize();
 
         Ok(w)
@@ -255,32 +243,24 @@ impl IpmSolver {
         // RHS: h_i = r_{p,i} - tr(A_i (σμ S^{-1} - X)) + tr(A_i W R_d W)
         let s_inv = s
             .inverse_regularized(EIGENVALUE_FLOOR)
-            .map_err(|e| GwError::SolverFailed(format!("Schur S^-1: {e}")))?;
-        let centering = s_inv
-            .scale(mu)
-            .sub(x)
-            .map_err(|e| GwError::SolverFailed(format!("Schur centering: {e}")))?;
+            .map_err(at("Schur S^-1"))?;
+        let centering = s_inv.scale(mu).sub(x).map_err(at("Schur centering"))?;
 
         let rd = Self::dual_residual(problem, y, s)?;
 
-        let w_rd_w = w
-            .congruence(&rd)
-            .map_err(|e| GwError::SolverFailed(format!("Schur W*Rd*W: {e}")))?;
+        let w_rd_w = w.congruence(&rd).map_err(at("Schur W*Rd*W"))?;
 
         let mut h = vec![0.0; m];
         for (i, ci) in problem.constraints().iter().enumerate() {
-            let rp = ci.rhs()
-                - ci.matrix()
-                    .inner_product(x)
-                    .map_err(|e| GwError::SolverFailed(format!("Schur rp: {e}")))?;
+            let rp = ci.rhs() - ci.matrix().inner_product(x).map_err(at("Schur rp"))?;
             let center_term = ci
                 .matrix()
                 .inner_product(&centering)
-                .map_err(|e| GwError::SolverFailed(format!("Schur center: {e}")))?;
+                .map_err(at("Schur center"))?;
             let rd_term = ci
                 .matrix()
                 .inner_product(&w_rd_w)
-                .map_err(|e| GwError::SolverFailed(format!("Schur rd_term: {e}")))?;
+                .map_err(at("Schur rd_term"))?;
             h[i] = rp - center_term + rd_term;
         }
 
@@ -313,34 +293,27 @@ impl IpmSolver {
         let mut schur_reg = schur;
         schur_reg.add_to_diagonal(SCHUR_REGULARIZATION);
 
-        let l_schur = schur_reg
-            .cholesky()
-            .map_err(|e| GwError::SolverFailed(format!("Schur Cholesky: {e}")))?;
-        let dy = DenseMatrix::cholesky_solve(&l_schur, &h)
-            .map_err(|e| GwError::SolverFailed(format!("Schur solve: {e}")))?;
+        let l_schur = schur_reg.cholesky().map_err(at("Schur Cholesky"))?;
+        let dy = DenseMatrix::cholesky_solve(&l_schur, &h).map_err(at("Schur solve"))?;
 
         // ΔS = R_d − Σ Δy_i A_i
         let mut ds = Self::dual_residual(problem, y, s)?;
         for (ci, &dyi) in problem.constraints().iter().zip(&dy) {
             ci.matrix()
                 .add_scaled_to(&mut ds, -dyi)
-                .map_err(|e| GwError::SolverFailed(format!("ds update: {e}")))?;
+                .map_err(at("ds update"))?;
         }
 
         // ΔX = σμ S⁻¹ − X − W ΔS W  (note the MINUS sign on W ΔS W)
         let s_inv = s
             .inverse_regularized(EIGENVALUE_FLOOR)
-            .map_err(|e| GwError::SolverFailed(format!("dx S^-1: {e}")))?;
+            .map_err(at("dx S^-1"))?;
 
         let mut dx = s_inv.scale(mu);
-        dx.sub_assign(x)
-            .map_err(|e| GwError::SolverFailed(format!("dx sub X: {e}")))?;
+        dx.sub_assign(x).map_err(at("dx sub X"))?;
 
-        let w_ds_w = w
-            .congruence(&ds)
-            .map_err(|e| GwError::SolverFailed(format!("dx W*dS*W: {e}")))?;
-        dx.sub_assign(&w_ds_w)
-            .map_err(|e| GwError::SolverFailed(format!("dx sub WdSW: {e}")))?;
+        let w_ds_w = w.congruence(&ds).map_err(at("dx W*dS*W"))?;
+        dx.sub_assign(&w_ds_w).map_err(at("dx sub WdSW"))?;
 
         // Symmetrize ΔX to correct floating-point asymmetry.
         dx.symmetrize();
@@ -374,9 +347,7 @@ impl IpmSolver {
     ///
     /// See [`MATH.md`](./MATH.md) §3.6.
     fn complementarity(x: &DenseMatrix, s: &DenseMatrix, n: usize) -> Result<f64, GwError> {
-        let xs = x
-            .inner_product(s)
-            .map_err(|e| GwError::SolverFailed(format!("complementarity: {e}")))?;
+        let xs = x.inner_product(s).map_err(at("complementarity"))?;
         Ok(xs / n as f64)
     }
 
@@ -391,14 +362,11 @@ impl IpmSolver {
         s: &DenseMatrix,
         epsilon: f64,
     ) -> Result<bool, GwError> {
-        let solver_failed = |what: &str, e: GwError| GwError::SolverFailed(format!("{what}: {e}"));
         let primal_obj = problem
             .cost()
             .inner_product(x)
-            .map_err(|e| solver_failed("convergence primal obj", e))?;
-        let xs = x
-            .inner_product(s)
-            .map_err(|e| solver_failed("convergence gap", e))?;
+            .map_err(at("convergence primal obj"))?;
+        let xs = x.inner_product(s).map_err(at("convergence gap"))?;
         let gap = xs / (1.0 + primal_obj.abs());
 
         let mut primal_residual_sq = 0.0_f64;
@@ -407,7 +375,7 @@ impl IpmSolver {
             let ax = ci
                 .matrix()
                 .inner_product(x)
-                .map_err(|e| solver_failed("convergence A(X)", e))?;
+                .map_err(at("convergence A(X)"))?;
             primal_residual_sq = (ci.rhs() - ax).mul_add(ci.rhs() - ax, primal_residual_sq);
             b_sq = ci.rhs().mul_add(ci.rhs(), b_sq);
         }
@@ -416,12 +384,12 @@ impl IpmSolver {
         let rd = Self::dual_residual(problem, y, s)?;
         let rd_norm = rd
             .inner_product(&rd)
-            .map_err(|e| solver_failed("convergence |Rd|", e))?
+            .map_err(at("convergence |Rd|"))?
             .sqrt();
         let c_norm = problem
             .cost()
             .inner_product(problem.cost())
-            .map_err(|e| solver_failed("convergence |C|", e))?
+            .map_err(at("convergence |C|"))?
             .sqrt();
         let dual_infeasibility = rd_norm / (1.0 + c_norm);
 
@@ -438,10 +406,9 @@ impl IpmSolver {
         for (ci, &yi) in problem.constraints().iter().zip(y) {
             ci.matrix()
                 .add_scaled_to(&mut rd, -yi)
-                .map_err(|e| GwError::SolverFailed(format!("Rd accum: {e}")))?;
+                .map_err(at("Rd accum"))?;
         }
-        rd.sub_assign(s)
-            .map_err(|e| GwError::SolverFailed(format!("Rd sub S: {e}")))?;
+        rd.sub_assign(s).map_err(at("Rd sub S"))?;
         Ok(rd)
     }
 }
@@ -462,9 +429,7 @@ impl<'a> ScaledConstraint<'a> {
         match a {
             ConstraintMatrix::DiagonalUnit(k) => Ok(Self::Diagonal(*k)),
             ConstraintMatrix::Dense(a) => {
-                let waw = w
-                    .congruence(a)
-                    .map_err(|e| GwError::SolverFailed(format!("Schur W*A*W: {e}")))?;
+                let waw = w.congruence(a).map_err(at("Schur W*A*W"))?;
                 Ok(Self::Dense { a, waw })
             }
         }
@@ -477,9 +442,9 @@ impl<'a> ScaledConstraint<'a> {
             (Self::Diagonal(p), Self::Diagonal(q)) => Ok(w.get(*p, *q).powi(2)),
             (Self::Dense { waw, .. }, Self::Diagonal(k))
             | (Self::Diagonal(k), Self::Dense { waw, .. }) => Ok(waw.get(*k, *k)),
-            (Self::Dense { a, .. }, Self::Dense { waw, .. }) => a
-                .inner_product(waw)
-                .map_err(|e| GwError::SolverFailed(format!("Schur ip: {e}"))),
+            (Self::Dense { a, .. }, Self::Dense { waw, .. }) => {
+                a.inner_product(waw).map_err(at("Schur ip"))
+            }
         }
     }
 }
@@ -496,20 +461,26 @@ fn max_feasible_step(a: &DenseMatrix, da: &DenseMatrix) -> Result<f64, GwError> 
     // A^{-1/2} via eigendecomposition with clamped eigenvalues.
     let a_inv_half = a
         .inv_sqrt_clamped(EIGENVALUE_FLOOR)
-        .map_err(|e| GwError::SolverFailed(format!("step A^-1/2: {e}")))?;
+        .map_err(at("step A^-1/2"))?;
 
     let mut scaled = a_inv_half
         .congruence(da)
-        .map_err(|e| GwError::SolverFailed(format!("step A^-1/2 dA A^-1/2: {e}")))?;
+        .map_err(at("step A^-1/2 dA A^-1/2"))?;
     scaled.symmetrize();
 
-    let min_eig = scaled
-        .min_eigenvalue()
-        .map_err(|e| GwError::SolverFailed(format!("step eigenvalue: {e}")))?;
+    let min_eig = scaled.min_eigenvalue().map_err(at("step eigenvalue"))?;
 
     if min_eig >= 0.0 {
         Ok(1e10) // DA is PSD relative to A, step is essentially unbounded.
     } else {
         Ok(-1.0 / min_eig)
+    }
+}
+
+/// Wraps an error that the IPM step `stage` ran into.
+fn at(stage: &'static str) -> impl FnOnce(GwError) -> GwError {
+    move |cause| GwError::SolverStep {
+        stage,
+        cause: Box::new(cause),
     }
 }
