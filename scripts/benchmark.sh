@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Benchmark BM solver on Gset graphs.
+# Benchmark the BM solver on Gset graphs.
 # Outputs CSV to stdout; redirect to a file for plotting.
 #
 # Usage:
@@ -9,62 +9,51 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 BIN="./target/release/maxcut-sdp"
-cargo build --release 2>/dev/null
+cargo build --release >&2
 
-# Best-known values from literature (BLS, CirCut, DSDP, etc.)
-declare -A BEST_KNOWN=(
-    [G1]=11624   [G11]=564    [G14]=3064   [G22]=13359
-    [G35]=7687   [G43]=6660   [G48]=6000   [G55]=10299
-    [G58]=19293  [G60]=14188  [G63]=27047  [G67]=6950
-    [G70]=9591   [G77]=9940   [G81]=14060
-)
+INSTANCES=(G1 G11 G14 G22 G35 G43 G48 G55 G58 G60 G63 G67 G70 G77 G81)
 
-# Time budget tiers by node count.
+declare -A BEST_KNOWN
+while read -r name value; do
+    BEST_KNOWN[$name]=$value
+done < <(grep -v '^#' scripts/best_known.txt)
+
+# Time budget in seconds by node count.
 time_budget() {
     local n=$1
-    if   (( n <= 1000 )); then echo "--time 10"
-    elif (( n <= 2000 )); then echo "--time 30"
-    elif (( n <= 3000 )); then echo "--time 45"
-    elif (( n <= 5000 )); then echo "--time 90"
-    elif (( n <= 7000 )); then echo "--time 150"
-    elif (( n <= 10000 )); then echo "--time 300"
-    elif (( n <= 14000 )); then echo "--time 420"
-    else                        echo "--time 600"
+    if   (( n <= 1000 )); then echo 10
+    elif (( n <= 2000 )); then echo 30
+    elif (( n <= 3000 )); then echo 45
+    elif (( n <= 5000 )); then echo 90
+    elif (( n <= 7000 )); then echo 150
+    elif (( n <= 10000 )); then echo 300
+    elif (( n <= 14000 )); then echo 420
+    else                        echo 600
     fi
 }
 
 echo "graph,nodes,edges,solver,time_s,sdp_value,sdp_certified,cut_value,best_known,gap_pct"
 
-for f in scripts/graphs/gset/G{1,11,14,22,35,43,48,55,58,60,63,67,70,77,81}.txt; do
+for name in "${INSTANCES[@]}"; do
+    f="scripts/graphs/gset/$name.txt"
     if [ ! -f "$f" ]; then
         >&2 echo "missing $f (run scripts/download.py gset)"
         continue
     fi
-    name=$(basename "$f" .txt)
-    bk=${BEST_KNOWN[$name]:-0}
-
-    # Read node count from first line to pick time budget.
-    n=$(head -1 "$f" | awk '{print $1}')
+    bk=${BEST_KNOWN[$name]:?no best known value for $name in scripts/best_known.txt}
+    read -r n m < "$f"
     budget=$(time_budget "$n")
 
     >&2 echo "=== $name (n=$n) ==="
-    output=$($BIN "$f" --solver bm --seed 42 $budget 2>&1)
+    start=$(date +%s.%N)
+    output=$("$BIN" "$f" --solver bm --seed 42 --time "$budget")
+    end=$(date +%s.%N)
+    time_s=$(awk -v s="$start" -v e="$end" 'BEGIN { printf "%.3f", e - s }')
 
-    m=$(echo "$output" | grep "^Graph:" | sed 's/.*, \([0-9]*\) edges.*/\1/')
-    sdp=$(echo "$output" | grep -E "^SDP (bound|relaxation):" | awk '{print $3}')
-    if echo "$output" | grep -q "^SDP bound:"; then certified=yes; else certified=no; fi
-    cut=$(echo "$output" | grep "GW cut value:" | awk '{print $4}')
-    time_str=$(echo "$output" | grep "Total time:" | awk '{print $3}')
-
-    # Convert time string to seconds.
-    if echo "$time_str" | grep -q "ms$"; then
-        time_s=$(echo "$time_str" | sed 's/ms$//' | awk '{printf "%.3f", $1 / 1000}')
-    else
-        time_s=$(echo "$time_str" | sed 's/s$//')
-    fi
-
-    # Gap to best known (%).
-    gap=$(awk "BEGIN { printf \"%.2f\", 100 * (1 - ${cut%.000000} / $bk) }")
+    sdp=$(grep -E "^SDP (bound|relaxation):" <<< "$output" | awk '{print $3}')
+    if grep -q "^SDP bound:" <<< "$output"; then certified=yes; else certified=no; fi
+    cut=$(grep "^GW cut value:" <<< "$output" | awk '{print $4}')
+    gap=$(awk -v cut="$cut" -v bk="$bk" 'BEGIN { printf "%.2f", 100 * (1 - cut / bk) }')
 
     echo "${name},${n},${m},bm,${time_s},${sdp},${certified},${cut},${bk},${gap}"
     >&2 echo "  cut=${cut} best_known=${bk} gap=${gap}% time=${time_s}s"

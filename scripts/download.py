@@ -69,21 +69,13 @@ GSET_INSTANCES = {
     "G81": 20000,
 }
 
-# Known best cut values for verification.
-KNOWN_BEST = {
-    "g05_60.0": 536,
-    "g05_60.1": 532,
-    "g05_80.0": 934,
-    "g05_80.1": 942,
-    "g05_100.0": 1430,
-    "G1": 11624,
-    "G2": 11620,
-    "G3": 11622,
-    "G11": 564,
-    "G14": 3064,
-    "G22": 13359,
-    "G43": 6660,
-}
+
+def read_known_best() -> dict:
+    """Best known cut values by instance name, from best_known.txt."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "best_known.txt")
+    with open(path) as f:
+        pairs = (line.split() for line in f if line.strip() and not line.startswith("#"))
+        return {name: int(value) for name, value in pairs}
 
 
 def download(url: str, dest: str) -> bool:
@@ -128,6 +120,7 @@ def list_downloaded():
     """List all downloaded graphs with sizes."""
     print("\n=== Downloaded instances ===")
     total = 0
+    known_best = read_known_best()
     for root, _dirs, files in sorted(os.walk(GRAPH_DIR)):
         for f in sorted(files):
             if not f.endswith(".txt"):
@@ -139,7 +132,7 @@ def list_downloaded():
             if len(header) >= 2:
                 n, m = header[0], header[1]
                 stem = f.removesuffix(".txt")
-                opt = KNOWN_BEST.get(stem, "")
+                opt = known_best.get(stem, "")
                 opt_str = f"  best={opt}" if opt else ""
                 print(f"  {rel:45s}  n={n:>5s}  m={m:>7s}{opt_str}")
                 total += 1
