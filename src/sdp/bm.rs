@@ -72,8 +72,6 @@ pub struct BmSolution {
     pub vectors: DenseMatrix,
     /// The BM objective value (negative for Max-Cut).
     pub objective: f64,
-    /// Final Riemannian gradient Frobenius norm.
-    pub gradient_norm: f64,
     /// Gradient descent iterations taken.
     pub iterations: usize,
 }
@@ -91,175 +89,268 @@ impl BmSolver {
     }
 
     /// Solves the Max-Cut SDP relaxation via Burer-Monteiro with nonlinear CG,
-    /// from one random start drawn from `rng`.
-    ///
-    /// Returns a [`BmSolution`] whose `vectors` field can be passed directly to
-    /// [`multi_round_from_vectors`](crate::maxcut::rounding::multi_round_from_vectors).
+    /// from one random start drawn from `rng`, reporting progress to
+    /// `on_progress` as it goes.
     ///
     /// # Errors
     ///
     /// Returns an error if the graph is empty.
-    pub fn solve_maxcut(&self, graph: &Graph, rng: &mut impl Rng) -> Result<BmSolution, GwError> {
-        self.solve_maxcut_with_context(graph, rng, None)
-    }
-
-    /// Like `solve_maxcut`, but prints `best_known_cut` alongside iteration progress.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the graph is empty.
-    pub fn solve_maxcut_with_context(
+    pub fn solve_maxcut(
         &self,
         graph: &Graph,
         rng: &mut impl Rng,
-        best_known_cut: Option<f64>,
+        mut on_progress: impl FnMut(BmProgress),
     ) -> Result<BmSolution, GwError> {
         let n = graph.num_vertices();
         if n == 0 {
             return Err(GwError::InvalidGraph("empty graph".into()));
         }
+        let r = self.factor_rank(n);
+        let edges = column_edges(graph, r);
+        let start = random_unit_vectors(n, r, rng);
+        Ok(self.descend(&edges, start, &mut on_progress))
+    }
 
+    /// The configured rank, or `⌈√(2n)⌉`, clamped to `[2, n]`.
+    fn factor_rank(&self, n: usize) -> usize {
         let r = self
             .config
             .rank
             .unwrap_or_else(|| ((2.0 * n as f64).sqrt()).ceil() as usize);
-        let r = r.max(2).min(n);
+        r.max(2).min(n)
+    }
 
-        let edges = column_edges(graph, r);
-
-        let mut riem_grad = DenseMatrix::zeros(r, n);
-        let mut search_dir = DenseMatrix::zeros(r, n);
-        let mut riem_grad_prev = DenseMatrix::zeros(r, n);
-        let mut v_trial = DenseMatrix::zeros(r, n);
-
-        let mut v = random_unit_vectors(n, r, rng);
-        let mut f_current = compute_objective_sparse(&edges, v.data(), r);
-        let mut alpha = self.config.initial_step_size;
-        let mut final_grad_norm = 0.0;
-        let mut iters = 0;
-        let mut prev_grad_norm_sq = 0.0_f64;
-        let mut f_checkpoint = f_current;
-        let obj_check_interval = 100_usize.max(n / 10);
-        let mut stall_count = 0_usize;
-
-        for iter in 0..self.config.max_iterations {
-            // Phase 5: Fused gradient + tangent projection + norm.
-            let grad_norm = compute_riemannian_gradient(&edges, &v, &mut riem_grad);
-            final_grad_norm = grad_norm;
-            iters = iter + 1;
-
-            if grad_norm < self.config.gradient_tolerance {
+    /// Runs conjugate gradient from `start` until the gradient vanishes, the
+    /// objective stalls, the line search fails or the iterations run out.
+    fn descend(
+        &self,
+        edges: &[ColumnEdge],
+        start: DenseMatrix,
+        on_progress: &mut impl FnMut(BmProgress),
+    ) -> BmSolution {
+        let n = start.cols();
+        let mut descent = Descent::new(&self.config, edges, start);
+        let mut stall = StallDetector::new(n, descent.objective, &self.config);
+        let mut gradient_norm = 0.0;
+        let mut iterations = 0;
+        for iteration in 0..self.config.max_iterations {
+            gradient_norm = descent.compute_gradient();
+            iterations = iteration + 1;
+            if gradient_norm < self.config.gradient_tolerance
+                || stall.has_stalled(iteration, descent.objective)
+            {
                 break;
             }
-
-            // Objective-based stopping: if relative improvement over the
-            // last window is negligible, further iterations won't help rounding.
-            if iter > 0 && iter % obj_check_interval == 0 {
-                let denom = f_current.abs().max(1.0);
-                let rel_improve = (f_checkpoint - f_current) / denom;
-                f_checkpoint = f_current;
-                if rel_improve < self.config.objective_tolerance {
-                    stall_count += 1;
-                    if stall_count >= self.config.max_stall_windows {
-                        break;
-                    }
-                } else {
-                    stall_count = 0;
-                }
+            if iteration > 0 && iteration % PROGRESS_INTERVAL == 0 {
+                on_progress(BmProgress::Iteration {
+                    iteration,
+                    relaxation: -descent.objective,
+                    gradient_norm,
+                });
             }
-
-            if iter > 0 && iter % 500 == 0 {
-                if let Some(bk) = best_known_cut {
-                    eprintln!(
-                        "  iter {iter}: obj={:.4}, grad={grad_norm:.2e}, best={bk:.0}",
-                        -f_current
-                    );
-                } else {
-                    eprintln!("  iter {iter}: obj={:.4}, grad={grad_norm:.2e}", -f_current);
-                }
-            }
-
-            let grad_norm_sq = grad_norm * grad_norm;
-
-            // Phase 6: Nonlinear CG (Polak-Ribière with restarts).
-            let beta = if iter == 0 {
-                0.0
-            } else {
-                compute_pr_beta(&riem_grad, &riem_grad_prev, prev_grad_norm_sq, n, iter)
-            };
-
-            if beta == 0.0 {
-                // Steepest descent: d = -g
-                let ddata = search_dir.data_mut();
-                let gdata = riem_grad.data();
-                for k in 0..ddata.len() {
-                    ddata[k] = -gdata[k];
-                }
-            } else {
-                // d = -g + beta * T(d_prev)
-                // First transport d_prev to tangent space at current v,
-                // then combine.
-                project_to_tangent_inplace(&v, &mut search_dir);
-                let ddata = search_dir.data_mut();
-                let gdata = riem_grad.data();
-                for k in 0..ddata.len() {
-                    ddata[k] = beta.mul_add(ddata[k], -gdata[k]);
-                }
-            }
-
-            // Check descent: if ⟨g, d⟩ ≥ 0, reset to steepest descent.
-            let dir_deriv = dot(riem_grad.data(), search_dir.data());
-            if dir_deriv >= 0.0 {
-                let ddata = search_dir.data_mut();
-                let gdata = riem_grad.data();
-                for k in 0..ddata.len() {
-                    ddata[k] = -gdata[k];
-                }
-            }
-
-            // Save current gradient for next iteration's CG update.
-            riem_grad_prev.data_mut().copy_from_slice(riem_grad.data());
-            prev_grad_norm_sq = grad_norm_sq;
-
-            // Armijo backtracking along search_dir.
-            let dir_deriv_for_armijo = dot(riem_grad.data(), search_dir.data());
-            alpha = (alpha / self.config.backtracking_beta).min(self.config.initial_step_size);
-            let sufficient_decrease = self.config.armijo_c1 * dir_deriv_for_armijo;
-
-            let mut accepted = false;
-            loop {
-                step_and_retract(&v, &search_dir, alpha, &mut v_trial);
-                let f_trial = compute_objective_sparse(&edges, v_trial.data(), r);
-
-                if f_trial <= alpha.mul_add(sufficient_decrease, f_current) {
-                    std::mem::swap(&mut v, &mut v_trial);
-                    f_current = f_trial;
-                    accepted = true;
-                    break;
-                }
-
-                alpha *= self.config.backtracking_beta;
-                if alpha < 1e-20 {
-                    break;
-                }
-            }
-
-            if !accepted {
+            let dir_deriv = descent.set_search_direction(iteration, gradient_norm);
+            if !descent.armijo_step(dir_deriv) {
                 break;
             }
         }
+        on_progress(BmProgress::Finished {
+            iterations,
+            relaxation: -descent.objective,
+            gradient_norm,
+        });
+        BmSolution {
+            vectors: descent.v,
+            objective: descent.objective,
+            iterations,
+        }
+    }
+}
 
-        eprintln!(
-            "BM: iters={iters}, obj={:.4}, grad={final_grad_norm:.2e}",
-            -f_current
-        );
+/// Progress a BM solve reports.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BmProgress {
+    /// Every [`PROGRESS_INTERVAL`] iterations after the first.
+    Iteration {
+        /// Iterations so far.
+        iteration: usize,
+        /// The relaxation value `−f` reached.
+        relaxation: f64,
+        /// The Riemannian gradient's Frobenius norm.
+        gradient_norm: f64,
+    },
+    /// When the solve stops.
+    Finished {
+        /// Iterations taken.
+        iterations: usize,
+        /// The relaxation value `−f` reached.
+        relaxation: f64,
+        /// The last Riemannian gradient's Frobenius norm.
+        gradient_norm: f64,
+    },
+}
 
-        Ok(BmSolution {
-            vectors: v,
-            objective: f_current,
-            gradient_norm: final_grad_norm,
-            iterations: iters,
-        })
+/// Iterations between [`BmProgress::Iteration`] reports.
+pub const PROGRESS_INTERVAL: usize = 500;
+
+/// Fewest iterations between objective-stall checks; large graphs check every
+/// `n / 10`.
+const MIN_STALL_CHECK_INTERVAL: usize = 100;
+
+/// The Armijo search gives up once the step shrinks below this.
+const MIN_STEP: f64 = 1e-20;
+
+/// A previous gradient with a squared norm below this restarts CG as
+/// steepest descent instead of dividing by it.
+const MIN_PREVIOUS_GRADIENT_NORM_SQ: f64 = 1e-30;
+
+/// The state of one conjugate-gradient descent and its work buffers.
+struct Descent<'a> {
+    config: &'a BmSolverConfig,
+    edges: &'a [ColumnEdge],
+    v: DenseMatrix,
+    v_trial: DenseMatrix,
+    riem_grad: DenseMatrix,
+    riem_grad_prev: DenseMatrix,
+    search_dir: DenseMatrix,
+    /// The objective `f` at `v`.
+    objective: f64,
+    /// The last accepted Armijo step.
+    alpha: f64,
+    prev_grad_norm_sq: f64,
+}
+
+impl<'a> Descent<'a> {
+    fn new(config: &'a BmSolverConfig, edges: &'a [ColumnEdge], v: DenseMatrix) -> Self {
+        let (r, n) = (v.rows(), v.cols());
+        Self {
+            config,
+            edges,
+            objective: compute_objective_sparse(edges, v.data(), r),
+            v,
+            v_trial: DenseMatrix::zeros(r, n),
+            riem_grad: DenseMatrix::zeros(r, n),
+            riem_grad_prev: DenseMatrix::zeros(r, n),
+            search_dir: DenseMatrix::zeros(r, n),
+            alpha: config.initial_step_size,
+            prev_grad_norm_sq: 0.0,
+        }
+    }
+
+    /// Computes the Riemannian gradient at `v` and returns its norm.
+    fn compute_gradient(&mut self) -> f64 {
+        compute_riemannian_gradient(self.edges, &self.v, &mut self.riem_grad)
+    }
+
+    /// Sets the Polak-Ribière+ direction, or steepest descent where that is
+    /// not a descent direction, and returns its directional derivative.
+    fn set_search_direction(&mut self, iteration: usize, gradient_norm: f64) -> f64 {
+        let beta = if iteration == 0 {
+            0.0
+        } else {
+            compute_pr_beta(
+                &self.riem_grad,
+                &self.riem_grad_prev,
+                self.prev_grad_norm_sq,
+                self.v.cols(),
+                iteration,
+            )
+        };
+        if beta == 0.0 {
+            set_steepest_descent(&mut self.search_dir, &self.riem_grad);
+        } else {
+            // Transport the previous direction to the tangent space at v.
+            project_to_tangent_inplace(&self.v, &mut self.search_dir);
+            let gdata = self.riem_grad.data();
+            for (d, &g) in self.search_dir.data_mut().iter_mut().zip(gdata) {
+                *d = beta.mul_add(*d, -g);
+            }
+        }
+        let mut dir_deriv = dot(self.riem_grad.data(), self.search_dir.data());
+        if dir_deriv >= 0.0 {
+            set_steepest_descent(&mut self.search_dir, &self.riem_grad);
+            dir_deriv = dot(self.riem_grad.data(), self.search_dir.data());
+        }
+        self.riem_grad_prev
+            .data_mut()
+            .copy_from_slice(self.riem_grad.data());
+        self.prev_grad_norm_sq = gradient_norm * gradient_norm;
+        dir_deriv
+    }
+
+    /// Backtracks along the search direction until the Armijo condition
+    /// holds and moves there; `false` when the step shrinks away first.
+    fn armijo_step(&mut self, dir_deriv: f64) -> bool {
+        let config = self.config;
+        let r = self.v.rows();
+        self.alpha = (self.alpha / config.backtracking_beta).min(config.initial_step_size);
+        let sufficient_decrease = config.armijo_c1 * dir_deriv;
+        loop {
+            step_and_retract(&self.v, &self.search_dir, self.alpha, &mut self.v_trial);
+            let f_trial = compute_objective_sparse(self.edges, self.v_trial.data(), r);
+            if f_trial <= self.alpha.mul_add(sufficient_decrease, self.objective) {
+                std::mem::swap(&mut self.v, &mut self.v_trial);
+                self.objective = f_trial;
+                return true;
+            }
+            self.alpha *= config.backtracking_beta;
+            if self.alpha < MIN_STEP {
+                return false;
+            }
+        }
+    }
+}
+
+/// Stops a descent once the objective's relative improvement over a window
+/// of iterations has stayed below tolerance for `max_stall_windows` windows.
+struct StallDetector {
+    interval: usize,
+    checkpoint: f64,
+    stalls: usize,
+    tolerance: f64,
+    max_stalls: usize,
+}
+
+impl StallDetector {
+    fn new(n: usize, objective: f64, config: &BmSolverConfig) -> Self {
+        Self {
+            interval: MIN_STALL_CHECK_INTERVAL.max(n / 10),
+            checkpoint: objective,
+            stalls: 0,
+            tolerance: config.objective_tolerance,
+            max_stalls: config.max_stall_windows,
+        }
+    }
+
+    /// Whether `objective` at `iteration` ends the descent.
+    fn has_stalled(&mut self, iteration: usize, objective: f64) -> bool {
+        if iteration == 0 || !iteration.is_multiple_of(self.interval) {
+            return false;
+        }
+        let improvement = (self.checkpoint - objective) / objective.abs().max(1.0);
+        self.checkpoint = objective;
+        if improvement < self.tolerance {
+            self.stalls += 1;
+            self.stalls >= self.max_stalls
+        } else {
+            self.stalls = 0;
+            false
+        }
+    }
+}
+
+/// `d ← −g`.
+fn set_steepest_descent(direction: &mut DenseMatrix, gradient: &DenseMatrix) {
+    for (d, &g) in direction.data_mut().iter_mut().zip(gradient.data()) {
+        *d = -g;
+    }
+}
+
+/// Projects `h` onto the tangent space of the unit sphere at `v`:
+/// `h ← h − ⟨v, h⟩ v`.
+fn project_to_tangent(v: &[f64], h: &mut [f64]) {
+    let d = dot(v, h);
+    for (h_k, &v_k) in h.iter_mut().zip(v) {
+        *h_k = d.mul_add(-v_k, *h_k);
     }
 }
 
@@ -367,10 +458,7 @@ fn compute_riemannian_gradient(
         .map(|(g_cols, v_cols)| {
             let mut norm_sq = 0.0_f64;
             for (g_col, v_col) in g_cols.chunks_mut(r).zip(v_cols.chunks(r)) {
-                let d = dot(v_col, g_col);
-                for k in 0..g_col.len() {
-                    g_col[k] = d.mul_add(-v_col[k], g_col[k]);
-                }
+                project_to_tangent(v_col, g_col);
                 norm_sq += dot(g_col, g_col);
             }
             norm_sq
@@ -390,12 +478,7 @@ fn project_to_tangent_inplace(v: &DenseMatrix, h: &mut DenseMatrix) {
     hdata
         .par_chunks_mut(r)
         .zip(vdata.par_chunks(r))
-        .for_each(|(h_col, v_col)| {
-            let d = dot(v_col, h_col);
-            for k in 0..h_col.len() {
-                h_col[k] = d.mul_add(-v_col[k], h_col[k]);
-            }
-        });
+        .for_each(|(h_col, v_col)| project_to_tangent(v_col, h_col));
 }
 
 /// Computes the Polak-Ribière+ beta with periodic restarts.
@@ -414,7 +497,7 @@ fn compute_pr_beta(
         return 0.0;
     }
 
-    if prev_grad_norm_sq < 1e-30 {
+    if prev_grad_norm_sq < MIN_PREVIOUS_GRADIENT_NORM_SQ {
         return 0.0;
     }
 
@@ -550,14 +633,9 @@ mod tests {
         let edata = euc_grad_dense.data();
         let rdata = riem_dense.data_mut();
 
-        for i in 0..n {
-            let start = i * r;
-            let vi = &vdata[start..start + r];
-            let ei = &edata[start..start + r];
-            let d = dot(vi, ei);
-            for k in 0..r {
-                rdata[start + k] = d.mul_add(-vi[k], ei[k]);
-            }
+        rdata.copy_from_slice(edata);
+        for (r_col, v_col) in rdata.chunks_mut(r).zip(vdata.chunks(r)) {
+            project_to_tangent(v_col, r_col);
         }
 
         for idx in 0..(r * n) {
@@ -654,7 +732,7 @@ mod tests {
             ..BmSolverConfig::default()
         });
         let sol = solver
-            .solve_maxcut(&g, &mut rng)
+            .solve_maxcut(&g, &mut rng, |_| {})
             .unwrap_or_else(|_| panic!("solve failed"));
 
         // Optimal: ‖v0 − v1‖² = 4 (antipodal), objective = −(1/4)·1·4 = −1.
@@ -677,7 +755,7 @@ mod tests {
             ..BmSolverConfig::default()
         });
         let sol = solver
-            .solve_maxcut(&g, &mut rng)
+            .solve_maxcut(&g, &mut rng, |_| {})
             .unwrap_or_else(|_| panic!("solve failed"));
 
         // SDP bound for K3 = −objective ≈ 2.25 (from GW relaxation).
