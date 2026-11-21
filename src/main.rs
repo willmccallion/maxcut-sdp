@@ -3,6 +3,7 @@
 //! Parses a graph from an input file, runs the Goemans-Williamson algorithm,
 //! and reports the cut value, SDP bound, and approximation ratio.
 
+use std::fmt;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -131,7 +132,34 @@ fn main() {
 /// The most a reported cut may differ from the cut its partition gives.
 const VERIFICATION_TOLERANCE: f64 = 1e-6;
 
-fn run(cli: &Cli) -> Result<(), GwError> {
+/// Why a run failed.
+#[derive(Debug)]
+enum CliError {
+    /// The input file could not be read.
+    Read {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    /// Parsing or solving failed.
+    Solver(GwError),
+}
+
+impl From<GwError> for CliError {
+    fn from(error: GwError) -> Self {
+        Self::Solver(error)
+    }
+}
+
+impl fmt::Display for CliError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Read { path, source } => write!(f, "failed to read {}: {source}", path.display()),
+            Self::Solver(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+fn run(cli: &Cli) -> Result<(), CliError> {
     let graph = read_graph(cli)?;
     println!(
         "Graph: {} vertices, {} edges, total weight {:.3}",
@@ -153,14 +181,17 @@ fn run(cli: &Cli) -> Result<(), GwError> {
     Ok(())
 }
 
-fn read_graph(cli: &Cli) -> Result<Graph, GwError> {
-    let input = std::fs::read_to_string(&cli.input)
-        .map_err(|e| GwError::ParseError(format!("failed to read {}: {e}", cli.input.display())))?;
-    match cli.format {
+fn read_graph(cli: &Cli) -> Result<Graph, CliError> {
+    let input = std::fs::read_to_string(&cli.input).map_err(|source| CliError::Read {
+        path: cli.input.clone(),
+        source,
+    })?;
+    let graph = match cli.format {
         Some(InputFormat::Biqmac) => parse_biqmac(&input),
         Some(InputFormat::Dimacs) => parse_dimacs(&input),
         None => parse_auto(&input),
-    }
+    };
+    Ok(graph?)
 }
 
 /// Runs GW on `graph` with the `kind` of solver and the options `cli` gives.
