@@ -12,7 +12,7 @@
 //! approximation ratio of `α_GW ≈ 0.878`, which is optimal under the Unique
 //! Games Conjecture.
 //!
-//! See [`MATH.md`](./MATH.md) for the full mathematical derivation.
+//! See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/maxcut/MATH.md) for the full mathematical derivation.
 
 mod bm_pipeline;
 pub mod exact;
@@ -259,7 +259,7 @@ impl Default for BmConfig {
 /// vectors in `config.plan`'s trials, each improved by iterated local
 /// search, and returns the best cut with the bound the SDP certifies.
 /// BM rounds after each of its restarts and, with a time limit, refines the
-/// best cuts until it runs out. See [`MATH.md`](./MATH.md) §10.
+/// best cuts until it runs out. See [`MATH.md`](https://github.com/willmccallion/maxcut-sdp/blob/main/src/maxcut/MATH.md) §10.
 ///
 /// # Errors
 ///
