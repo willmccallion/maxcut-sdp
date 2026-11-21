@@ -1,31 +1,14 @@
 //! The `time_limit` budget of the Burer-Monteiro pipeline.
 
+mod common;
+
 use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
+use common::sparse_random_graph;
 use maxcut_sdp::graph::Graph;
 use maxcut_sdp::maxcut::{GwBmConfig, gw_maxcut_bm};
 use maxcut_sdp::sdp::solver_bm::BmSolverConfig;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-
-/// Erdős–Rényi graph with about five neighbors per vertex and weights 1..=10.
-fn sparse_random_graph(n: usize, seed: u64) -> Graph {
-    let mut rng = StdRng::seed_from_u64(seed);
-    let p = 5.0 / n as f64;
-    let mut g = Graph::new(n);
-    for u in 0..n {
-        for v in u + 1..n {
-            if rng.random::<f64>() < p {
-                let w = f64::from(rng.random_range(1..=10_u32));
-                if let Err(e) = g.add_edge(u, v, w) {
-                    panic!("valid edge rejected: {e}");
-                }
-            }
-        }
-    }
-    g
-}
 
 fn elapsed_with_budget(graph: &Graph, num_restarts: usize, budget: Duration) -> Duration {
     let config = GwBmConfig {
@@ -42,7 +25,9 @@ fn elapsed_with_budget(graph: &Graph, num_restarts: usize, budget: Duration) -> 
     let result = gw_maxcut_bm(graph, &config);
     let elapsed = start.elapsed();
 
-    assert!(result.is_ok(), "solver failed");
+    if let Err(e) = result {
+        panic!("solver failed: {e}");
+    }
     elapsed
 }
 

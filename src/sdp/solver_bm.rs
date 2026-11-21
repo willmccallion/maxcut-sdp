@@ -500,20 +500,20 @@ mod tests {
     use super::*;
     use crate::graph::Graph;
 
-    /// Helper: build `K_3` (triangle with unit weights).
-    fn triangle() -> Graph {
-        let mut g = Graph::new(3);
-        let _ = g.add_edge(0, 1, 1.0);
-        let _ = g.add_edge(1, 2, 1.0);
-        let _ = g.add_edge(0, 2, 1.0);
+    fn graph_with(n: usize, edges: &[(usize, usize)]) -> Graph {
+        let mut g = Graph::new(n);
+        for &(u, v) in edges {
+            g.add_edge(u, v, 1.0).unwrap_or_else(|e| panic!("{e}"));
+        }
         g
     }
 
-    /// Helper: build a single edge (vertices 0–1, weight 1).
+    fn triangle() -> Graph {
+        graph_with(3, &[(0, 1), (1, 2), (0, 2)])
+    }
+
     fn single_edge() -> Graph {
-        let mut g = Graph::new(2);
-        let _ = g.add_edge(0, 1, 1.0);
-        g
+        graph_with(2, &[(0, 1)])
     }
 
     /// Pre-compute edge offsets for a graph with rank r.

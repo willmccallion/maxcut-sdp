@@ -1,30 +1,16 @@
 //! Reproducibility of seeded Burer-Monteiro runs.
 
+mod common;
+
+use common::sparse_random_graph;
 use maxcut_sdp::graph::Graph;
 use maxcut_sdp::maxcut::{GwBmConfig, SdpBound, gw_maxcut_bm};
 use maxcut_sdp::sdp::solver_bm::{BmSolver, BmSolverConfig};
+use rand::SeedableRng;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
 use std::num::NonZeroUsize;
 
 const RUNS: usize = 6;
-
-fn sparse_random_graph(n: usize, seed: u64) -> Graph {
-    let mut rng = StdRng::seed_from_u64(seed);
-    let p = 5.0 / n as f64;
-    let mut g = Graph::new(n);
-    for u in 0..n {
-        for v in u + 1..n {
-            if rng.random::<f64>() < p {
-                let w = f64::from(rng.random_range(1..=10_u32));
-                if let Err(e) = g.add_edge(u, v, w) {
-                    panic!("valid edge rejected: {e}");
-                }
-            }
-        }
-    }
-    g
-}
 
 #[test]
 fn same_seed_gives_bitwise_identical_bm_relaxation() {

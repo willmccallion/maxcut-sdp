@@ -3,13 +3,13 @@
 //! Each size is measured in a fresh child process (this test binary re-run
 //! with a probe filter), since `VmHWM` is a per-process high-water mark.
 
+mod common;
+
 use std::process::Command;
 
-use maxcut_sdp::graph::Graph;
+use common::erdos_renyi;
 use maxcut_sdp::sdp::SdpProblem;
 use maxcut_sdp::sdp::solver::{Solver, SolverConfig};
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
 
 const PROBE_N: &str = "MAXCUT_IPM_MEMORY_PROBE_N";
 
@@ -26,21 +26,6 @@ fn peak_rss_kib() -> u64 {
     kib
 }
 
-fn random_graph(n: usize, seed: u64) -> Graph {
-    let mut rng = StdRng::seed_from_u64(seed);
-    let mut g = Graph::new(n);
-    for u in 0..n {
-        for v in u + 1..n {
-            if rng.random::<f64>() < 0.1
-                && let Err(e) = g.add_edge(u, v, 1.0)
-            {
-                panic!("valid edge rejected: {e}");
-            }
-        }
-    }
-    g
-}
-
 /// IPM iterations each probe runs.
 const PROBE_ITERATIONS: usize = 3;
 
@@ -55,7 +40,7 @@ fn ipm_memory_probe() {
         panic!("{PROBE_N} is not a number");
     };
     if n > 0 {
-        let graph = random_graph(n, 11);
+        let graph = erdos_renyi(n, 0.1, 1..=1, 11);
         let Ok(problem) = SdpProblem::maxcut_relaxation(&graph) else {
             panic!("relaxation failed");
         };

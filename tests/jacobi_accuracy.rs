@@ -1,28 +1,16 @@
 //! Accuracy of the Jacobi eigendecomposition at small scales.
 
-use maxcut_sdp::graph::Graph;
+mod common;
+
+use common::erdos_renyi;
 use maxcut_sdp::sdp::linalg::DenseMatrix;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
 
 fn frobenius(m: &DenseMatrix) -> f64 {
     m.data().iter().map(|x| x * x).sum::<f64>().sqrt()
 }
 
 fn random_laplacian(n: usize, seed: u64) -> DenseMatrix {
-    let mut rng = StdRng::seed_from_u64(seed);
-    let mut g = Graph::new(n);
-    for u in 0..n {
-        for v in u + 1..n {
-            if rng.random::<f64>() < 0.1 {
-                let w = f64::from(rng.random_range(1..=10_u32));
-                if let Err(e) = g.add_edge(u, v, w) {
-                    panic!("valid edge rejected: {e}");
-                }
-            }
-        }
-    }
-    g.laplacian()
+    erdos_renyi(n, 0.1, 1..=10, seed).laplacian()
 }
 
 /// `‖A Q − Q Λ‖_F / ‖A‖_F`.
