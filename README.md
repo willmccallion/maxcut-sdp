@@ -47,6 +47,8 @@ Tested on the [Gset benchmark suite](https://web.stanford.edu/~yyye/yyye/Gset/) 
 
 **Median gap: 0.65%** across all 15 instances. 11 of 15 instances within 1% of best-known.
 
+These numbers and the charts below were measured before the November 2026 code changes and are pending a re-run; 8 of the 15 Gset files cannot be downloaded at the moment.
+
 ![Optimality gap on Gset instances](charts/gap_to_best.png)
 
 ![Cut value comparison](charts/cut_comparison.png)
