@@ -1,4 +1,4 @@
-//! Random hyperplane rounding for the GW algorithm.
+//! Rounding the SDP vectors to cuts, and improving the cuts by local search.
 //!
 //! After solving the Max-Cut SDP relaxation, the optimal matrix `X*` encodes
 //! a set of unit vectors `v_1, ..., v_n` (via `X* = V^T V`). This module
@@ -102,7 +102,6 @@ const CHOLESKY_REGULARIZATION: f64 = 1e-10;
 ///
 /// Returns an error if even the regularized matrix fails Cholesky.
 pub(crate) fn extract_vectors(x: &DenseMatrix) -> Result<DenseMatrix, GwError> {
-    // Try Cholesky directly first.
     if let Ok(l) = x.cholesky() {
         return Ok(l.transpose());
     }
@@ -172,31 +171,33 @@ fn projections(vectors: &DenseMatrix, r: &[f64]) -> Vec<f64> {
 ///
 /// For each vertex, if flipping it to the other side of the partition increases
 /// the cut value, flip it. Repeat until no single flip improves the cut.
-/// This typically improves cut values by 1-3% over raw hyperplane rounding.
 pub(crate) fn one_flip_local_search(partition: &mut [bool], graph: &Graph) -> f64 {
     let n = graph.num_vertices();
     let mut improved = true;
     while improved {
         improved = false;
         for v in 0..n {
-            // Compute gain from flipping vertex v.
-            // For each neighbor u: if same side, flipping v adds the edge to the cut (+w);
-            // if different side, flipping v removes it (-w).
-            let mut gain = 0.0_f64;
-            for &(u, w) in graph.neighbors(v) {
-                if partition[u] == partition[v] {
-                    gain += w;
-                } else {
-                    gain -= w;
-                }
-            }
-            if gain > 0.0 {
+            if flip_gain(graph, partition, v) > 0.0 {
                 partition[v] = !partition[v];
                 improved = true;
             }
         }
     }
     graph.cut_value(partition)
+}
+
+/// The cut gained by moving `v` to the other side: its edges to its own
+/// side become cut, and those to the other side uncut.
+fn flip_gain(graph: &Graph, partition: &[bool], v: usize) -> f64 {
+    let mut gain = 0.0_f64;
+    for &(u, w) in graph.neighbors(v) {
+        if partition[u] == partition[v] {
+            gain += w;
+        } else {
+            gain -= w;
+        }
+    }
+    gain
 }
 
 /// Rounds in one cycle of iterated local search's perturbation sizes: the
@@ -394,15 +395,6 @@ mod tests {
             ils_rounds,
             rounding: Rounding::Hyperplane,
         }
-    }
-
-    /// The cut gained by moving `v` to the other side.
-    fn flip_gain(graph: &Graph, partition: &[bool], v: usize) -> f64 {
-        graph
-            .neighbors(v)
-            .iter()
-            .map(|&(u, w)| if partition[u] == partition[v] { w } else { -w })
-            .sum()
     }
 
     #[test]

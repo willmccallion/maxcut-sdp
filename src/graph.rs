@@ -101,7 +101,6 @@ impl Graph {
         let n = self.n;
         let mut l = DenseMatrix::zeros(n, n);
 
-        // Single pass over edges: set off-diagonal entries and accumulate degree.
         for &(u, v, w) in &self.edges {
             l.set(u, v, l.get(u, v) - w);
             l.set(v, u, l.get(v, u) - w);
