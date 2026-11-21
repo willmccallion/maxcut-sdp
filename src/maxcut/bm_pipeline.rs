@@ -186,16 +186,7 @@ impl<'a, P: FnMut(Progress)> BmPipeline<'a, P> {
                 .par_iter_mut()
                 .map(|slot| slot.refine_until(self.graph, deadline))
                 .sum::<usize>();
-            for (slot, refined) in slots.iter().enumerate() {
-                if refined.cut.cut_value > best.cut_value {
-                    best = refined.cut.clone();
-                    (self.on_progress)(Progress::RefineImproved {
-                        best: best.cut_value,
-                        slot,
-                        elapsed: self.budget.elapsed(),
-                    });
-                }
-            }
+            self.adopt_improvements(&slots, &mut best);
             let now = self.budget.elapsed();
             if now.saturating_sub(last_report) >= REFINE_REPORT_INTERVAL {
                 (self.on_progress)(Progress::RefineStatus {
@@ -214,6 +205,20 @@ impl<'a, P: FnMut(Progress)> BmPipeline<'a, P> {
             });
         }
         best
+    }
+
+    /// Replaces `best` with each slot's cut that beats it, in slot order.
+    fn adopt_improvements(&mut self, slots: &[RefinementSlot], best: &mut Cut) {
+        for (slot, refined) in slots.iter().enumerate() {
+            if refined.cut.cut_value > best.cut_value {
+                *best = refined.cut.clone();
+                (self.on_progress)(Progress::RefineImproved {
+                    best: best.cut_value,
+                    slot,
+                    elapsed: self.budget.elapsed(),
+                });
+            }
+        }
     }
 }
 

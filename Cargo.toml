@@ -77,8 +77,6 @@ cast_possible_wrap = "allow"
 cast_lossless = "allow"
 bool_to_int_with_if = "allow"
 
-# Solver and linalg functions are necessarily large
-too_many_lines = "allow"
 
 [lints.rustdoc]
 all = "deny"
