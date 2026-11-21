@@ -10,14 +10,14 @@ use std::time::{Duration, Instant};
 use clap::Parser;
 use maxcut_sdp::GwError;
 use maxcut_sdp::maxcut::exact::exact_maxcut;
-use maxcut_sdp::maxcut::rounding::{RotationAngle, Rounding};
+use maxcut_sdp::maxcut::rounding::{RotationAngle, Rounding, TrialPlan};
 use maxcut_sdp::maxcut::{
-    GwBmConfig, GwConfig, MAX_CERTIFIED_VERTICES, MaxCutResult, Progress, SdpBound, cut_ratio,
-    gw_maxcut, gw_maxcut_bm,
+    Backend, BackendKind, BmConfig, DEFAULT_ILS_ROUNDS, DEFAULT_RESTARTS, DEFAULT_TRIALS, GwConfig,
+    MAX_CERTIFIED_VERTICES, MaxCutResult, Progress, SdpBound, cut_ratio, gw_maxcut,
 };
 use maxcut_sdp::parser::{parse_auto, parse_biqmac, parse_dimacs};
 use maxcut_sdp::sdp::bm::{BmProgress, BmSolverConfig};
-use maxcut_sdp::sdp::ipm::IpmConfig;
+use maxcut_sdp::sdp::ipm::{DEFAULT_EPSILON, IpmConfig};
 
 /// Goemans-Williamson Max-Cut approximation via semidefinite programming.
 #[derive(Parser, Debug)]
@@ -27,11 +27,11 @@ struct Cli {
     input: PathBuf,
 
     /// Number of random hyperplane rounding trials.
-    #[arg(long, default_value_t = maxcut_sdp::maxcut::DEFAULT_TRIALS)]
+    #[arg(long, default_value_t = DEFAULT_TRIALS)]
     trials: NonZeroUsize,
 
     /// IPM tolerance on the relative duality gap and infeasibilities (IPM only).
-    #[arg(long, default_value_t = 1e-8)]
+    #[arg(long, default_value_t = DEFAULT_EPSILON)]
     epsilon: f64,
 
     /// Also compute the exact max-cut (brute force, small graphs only).
@@ -55,11 +55,11 @@ struct Cli {
     rank: Option<usize>,
 
     /// Number of BM random restarts (each rounded independently).
-    #[arg(long, default_value_t = maxcut_sdp::maxcut::DEFAULT_RESTARTS)]
+    #[arg(long, default_value_t = DEFAULT_RESTARTS)]
     restarts: NonZeroUsize,
 
     /// Number of iterated local search rounds per rounding trial.
-    #[arg(long, default_value_t = 50)]
+    #[arg(long, default_value_t = DEFAULT_ILS_ROUNDS)]
     ils_rounds: usize,
 
     /// Time budget in seconds (BM only). Restarts after the first start only
@@ -88,10 +88,6 @@ enum InputFormat {
     Dimacs,
 }
 
-/// Largest graph `--solver auto` solves with the IPM, whose `O(n³)`
-/// iterations take seconds here and grow impractical soon after.
-const AUTO_IPM_MAX_VERTICES: usize = 100;
-
 /// SDP solver backend, as requested.
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 enum SolverChoice {
@@ -103,31 +99,22 @@ enum SolverChoice {
     Bm,
 }
 
-/// The SDP solver a run uses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Backend {
-    Ipm,
-    Bm,
-}
-
 impl SolverChoice {
-    /// The backend this choice runs on a graph of `vertices` vertices.
-    const fn backend(self, vertices: usize) -> Backend {
+    /// The solver this choice runs on a graph of `vertices` vertices.
+    const fn kind(self, vertices: usize) -> BackendKind {
         match self {
-            Self::Auto if vertices <= AUTO_IPM_MAX_VERTICES => Backend::Ipm,
-            Self::Auto | Self::Bm => Backend::Bm,
-            Self::Ipm => Backend::Ipm,
+            Self::Auto => BackendKind::auto_for(vertices),
+            Self::Ipm => BackendKind::Ipm,
+            Self::Bm => BackendKind::Bm,
         }
     }
 }
 
-impl Backend {
-    /// The name `--solver` takes for this backend.
-    const fn name(self) -> &'static str {
-        match self {
-            Self::Ipm => "ipm",
-            Self::Bm => "bm",
-        }
+/// The name `--solver` takes for a backend.
+const fn backend_name(kind: BackendKind) -> &'static str {
+    match kind {
+        BackendKind::Ipm => "ipm",
+        BackendKind::Bm => "bm",
     }
 }
 
@@ -157,65 +144,58 @@ fn run(cli: &Cli) -> Result<(), GwError> {
         graph.total_weight()
     );
 
-    let backend = cli.solver.backend(graph.num_vertices());
-    println!("Solver:         {}", backend.name());
+    let kind = cli.solver.kind(graph.num_vertices());
+    println!("Solver:         {}", backend_name(kind));
 
-    let rounding = cli
-        .rotation
-        .map_or(Rounding::Hyperplane, Rounding::OutwardRotation);
-    let start = Instant::now();
-    let result = match backend {
-        Backend::Ipm => {
-            let config = GwConfig {
-                num_trials: cli.trials,
-                ils_rounds: cli.ils_rounds,
-                rounding,
-                solver_config: IpmConfig {
-                    epsilon: cli.epsilon,
-                    ..IpmConfig::default()
-                },
-                seed: cli.seed,
-            };
-            gw_maxcut(&graph, &config)?
-        }
-        Backend::Bm => {
-            let config = GwBmConfig {
-                num_trials: cli.trials,
-                ils_rounds: cli.ils_rounds,
-                rounding,
-                solver_config: BmSolverConfig {
-                    rank: cli.rank,
-                    ..BmSolverConfig::default()
-                },
-                num_restarts: cli.restarts,
-                seed: cli.seed,
-                time_limit: cli.time.map(Duration::from_secs),
-            };
-            let mut best_cut = None;
-            gw_maxcut_bm(&graph, &config, |progress| {
-                report_progress(progress, &mut best_cut);
-            })?
-        }
+    let backend = match kind {
+        BackendKind::Ipm => Backend::Ipm(IpmConfig {
+            epsilon: cli.epsilon,
+            ..IpmConfig::default()
+        }),
+        BackendKind::Bm => Backend::Bm(BmConfig {
+            solver: BmSolverConfig {
+                rank: cli.rank,
+                ..BmSolverConfig::default()
+            },
+            num_restarts: cli.restarts,
+            time_limit: cli.time.map(Duration::from_secs),
+        }),
     };
+    let config = GwConfig {
+        plan: TrialPlan {
+            num_trials: cli.trials,
+            ils_rounds: cli.ils_rounds,
+            rounding: cli
+                .rotation
+                .map_or(Rounding::Hyperplane, Rounding::OutwardRotation),
+        },
+        seed: cli.seed,
+        backend,
+    };
+    let start = Instant::now();
+    let mut best_cut = None;
+    let result = gw_maxcut(&graph, &config, |progress| {
+        report_progress(progress, &mut best_cut);
+    })?;
     let elapsed = start.elapsed();
 
     // Verify: independently recompute the cut value from the partition.
-    let verified_cut = graph.cut_value(&result.partition);
-    if (verified_cut - result.cut_value).abs() > 1e-6 {
+    let verified_cut = graph.cut_value(&result.cut.partition);
+    if (verified_cut - result.cut.cut_value).abs() > 1e-6 {
         return Err(GwError::SolverFailed(format!(
             "VERIFICATION FAILED: reported cut {:.6} but recomputed cut {verified_cut:.6}",
-            result.cut_value
+            result.cut.cut_value
         )));
     }
 
     println!("\n--- Goemans-Williamson Result ---");
     println!("{}", describe_bound(result.sdp_bound));
-    println!("GW cut value:   {:.6} (verified)", result.cut_value);
+    println!("GW cut value:   {:.6} (verified)", result.cut.cut_value);
     println!("Approx ratio:   {}", describe_ratio(&result));
     println!("Rounding trials: {}", result.num_trials);
     println!("Total time:     {elapsed:.3?}");
 
-    let s_count = result.partition.iter().filter(|&&b| b).count();
+    let s_count = result.cut.partition.iter().filter(|&&b| b).count();
     println!(
         "Partition:      |S| = {}, |S̄| = {}",
         s_count,
@@ -231,7 +211,7 @@ fn run(cli: &Cli) -> Result<(), GwError> {
                 println!("\n--- Exact Max-Cut ---");
                 println!("Optimal cut:    {:.6}", exact_result.cut_value);
                 let gw_over_opt = cut_ratio(
-                    result.cut_value,
+                    result.cut.cut_value,
                     exact_result.cut_value,
                     graph.total_abs_weight(),
                 );
@@ -328,31 +308,4 @@ fn format_ratio(ratio: Option<f64>) -> String {
         || "undefined (the bound is 0)".to_string(),
         |r| format!("{r:.6}"),
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn auto_runs_the_ipm_up_to_its_limit() {
-        assert_eq!(
-            SolverChoice::Auto.backend(AUTO_IPM_MAX_VERTICES),
-            Backend::Ipm
-        );
-    }
-
-    #[test]
-    fn auto_runs_bm_past_the_ipm_limit() {
-        assert_eq!(
-            SolverChoice::Auto.backend(AUTO_IPM_MAX_VERTICES + 1),
-            Backend::Bm
-        );
-    }
-
-    #[test]
-    fn an_explicit_solver_runs_at_any_size() {
-        assert_eq!(SolverChoice::Ipm.backend(10_000), Backend::Ipm);
-        assert_eq!(SolverChoice::Bm.backend(3), Backend::Bm);
-    }
 }

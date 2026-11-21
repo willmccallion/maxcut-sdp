@@ -68,11 +68,21 @@ impl Rounding {
 #[derive(Debug, Clone, Copy)]
 pub struct TrialPlan {
     /// Number of independent rounding trials.
-    pub trials: NonZeroUsize,
+    pub num_trials: NonZeroUsize,
     /// Iterated local search rounds applied to each trial's partition.
     pub ils_rounds: usize,
     /// How each trial rounds the SDP vectors.
     pub rounding: Rounding,
+}
+
+impl Default for TrialPlan {
+    fn default() -> Self {
+        Self {
+            num_trials: super::DEFAULT_TRIALS,
+            ils_rounds: super::DEFAULT_ILS_ROUNDS,
+            rounding: Rounding::default(),
+        }
+    }
 }
 
 /// The `ε` of `X + εI`, which lets Cholesky factor an `X` that is only
@@ -273,7 +283,7 @@ pub fn iterated_local_search_until(
 }
 
 /// The cuts of every rounding trial, in trial order: never empty, as
-/// `plan.trials` is not zero.
+/// `plan.num_trials` is not zero.
 ///
 /// The `vectors` matrix is `d × n`, column `i` the unit vector of vertex
 /// `i` (`d = n` from the IPM's Cholesky factor, `d = r` from BM). Each
@@ -288,7 +298,7 @@ pub fn round_trials(
     plan: TrialPlan,
     rng: &mut impl Rng,
 ) -> Vec<Cut> {
-    let seeds: Vec<u64> = (0..plan.trials.get())
+    let seeds: Vec<u64> = (0..plan.num_trials.get())
         .map(|_| rng.random::<u64>())
         .collect();
     seeds
@@ -380,7 +390,7 @@ mod tests {
 
     fn plan(trials: usize, ils_rounds: usize) -> TrialPlan {
         TrialPlan {
-            trials: NonZeroUsize::new(trials).unwrap_or_else(|| panic!("{trials} trials")),
+            num_trials: NonZeroUsize::new(trials).unwrap_or_else(|| panic!("{trials} trials")),
             ils_rounds,
             rounding: Rounding::Hyperplane,
         }

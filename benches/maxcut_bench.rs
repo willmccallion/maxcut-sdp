@@ -9,7 +9,7 @@ mod common;
 
 use common::{complete, cycle, sparse_random_graph};
 use criterion::{Criterion, criterion_group, criterion_main};
-use maxcut_sdp::maxcut::{GwBmConfig, gw_maxcut_bm};
+use maxcut_sdp::maxcut::{Backend, BmConfig, GwConfig, gw_maxcut};
 use maxcut_sdp::sdp::SdpProblem;
 use maxcut_sdp::sdp::bm::{BmSolver, BmSolverConfig};
 use maxcut_sdp::sdp::ipm::{IpmConfig, IpmSolver};
@@ -90,12 +90,13 @@ fn bench_bm(c: &mut Criterion) {
     let _ = group.bench_function("solve_sparse_1000", |b| {
         b.iter(|| solver.solve_maxcut(&graph, &mut StdRng::seed_from_u64(1), |_| {}));
     });
-    let config = GwBmConfig {
+    let config = GwConfig {
         seed: Some(1),
-        ..GwBmConfig::default()
+        backend: Backend::Bm(BmConfig::default()),
+        ..GwConfig::default()
     };
     let _ = group.bench_function("solve_and_round_sparse_1000", |b| {
-        b.iter(|| gw_maxcut_bm(&graph, &config, |_| {}));
+        b.iter(|| gw_maxcut(&graph, &config, |_| {}));
     });
     group.finish();
 }

@@ -7,20 +7,21 @@ use std::num::NonZeroUsize;
 
 use common::random_graph_with_edges;
 use maxcut_sdp::graph::Graph;
+use maxcut_sdp::maxcut::rounding::TrialPlan;
 use maxcut_sdp::maxcut::{
-    GwBmConfig, GwConfig, MAX_CERTIFIED_VERTICES, SdpBound, gw_maxcut, gw_maxcut_bm,
+    Backend, BmConfig, GwConfig, MAX_CERTIFIED_VERTICES, SdpBound, gw_maxcut,
 };
 use maxcut_sdp::sdp::bm::BmSolverConfig;
+use maxcut_sdp::sdp::ipm::IpmConfig;
 
 /// The SDP's value, from the IPM's certified bound.
 fn sdp_value(graph: &Graph) -> f64 {
-    let ipm = gw_maxcut(
-        graph,
-        &GwConfig {
-            seed: Some(1),
-            ..GwConfig::default()
-        },
-    );
+    let config = GwConfig {
+        seed: Some(1),
+        backend: Backend::Ipm(IpmConfig::default()),
+        ..GwConfig::default()
+    };
+    let ipm = gw_maxcut(graph, &config, |_| {});
     match ipm.unwrap_or_else(|e| panic!("ipm failed: {e}")).sdp_bound {
         SdpBound::Certified(bound) => bound,
         SdpBound::Relaxation(value) => panic!("the IPM left its value {value} uncertified"),
@@ -28,16 +29,22 @@ fn sdp_value(graph: &Graph) -> f64 {
 }
 
 /// A BM run with one rounding trial and BM stopped after `max_iterations`.
-fn quick_bm_config(max_iterations: usize) -> GwBmConfig {
-    GwBmConfig {
-        num_trials: NonZeroUsize::MIN,
-        ils_rounds: 0,
-        solver_config: BmSolverConfig {
-            max_iterations,
-            ..BmSolverConfig::default()
+fn quick_bm_config(max_iterations: usize) -> GwConfig {
+    GwConfig {
+        plan: TrialPlan {
+            num_trials: NonZeroUsize::MIN,
+            ils_rounds: 0,
+            ..TrialPlan::default()
         },
         seed: Some(1),
-        ..GwBmConfig::default()
+        backend: Backend::Bm(BmConfig {
+            solver: BmSolverConfig {
+                max_iterations,
+                ..BmSolverConfig::default()
+            },
+            num_restarts: NonZeroUsize::MIN,
+            time_limit: None,
+        }),
     }
 }
 
@@ -45,7 +52,7 @@ fn quick_bm_config(max_iterations: usize) -> GwBmConfig {
 fn an_unconverged_bm_still_reports_a_bound_at_least_the_sdp_value() {
     let graph = random_graph_with_edges(60, 240, 9);
 
-    let bm = gw_maxcut_bm(&graph, &quick_bm_config(2), |_| {});
+    let bm = gw_maxcut(&graph, &quick_bm_config(2), |_| {});
 
     let bm = bm.unwrap_or_else(|e| panic!("bm failed: {e}"));
     let sdp = sdp_value(&graph);
@@ -60,7 +67,7 @@ fn an_unconverged_bm_still_reports_a_bound_at_least_the_sdp_value() {
 fn a_converged_bm_certifies_a_bound_close_to_the_sdp_value() {
     let graph = random_graph_with_edges(60, 240, 9);
 
-    let bm = gw_maxcut_bm(&graph, &quick_bm_config(10_000), |_| {});
+    let bm = gw_maxcut(&graph, &quick_bm_config(10_000), |_| {});
 
     let bm = bm.unwrap_or_else(|e| panic!("bm failed: {e}"));
     let sdp = sdp_value(&graph);
@@ -78,7 +85,7 @@ fn past_the_certified_size_bm_reports_its_relaxation_value_and_no_ratio() {
     let n = MAX_CERTIFIED_VERTICES + 1;
     let graph = random_graph_with_edges(n, 2 * n, 9);
 
-    let bm = gw_maxcut_bm(&graph, &quick_bm_config(10), |_| {});
+    let bm = gw_maxcut(&graph, &quick_bm_config(10), |_| {});
 
     let bm = bm.unwrap_or_else(|e| panic!("bm failed: {e}"));
     assert!(

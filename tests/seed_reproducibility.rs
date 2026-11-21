@@ -3,7 +3,8 @@
 mod common;
 
 use common::sparse_random_graph;
-use maxcut_sdp::maxcut::{GwBmConfig, SdpBound, gw_maxcut_bm};
+use maxcut_sdp::maxcut::rounding::TrialPlan;
+use maxcut_sdp::maxcut::{Backend, BmConfig, GwConfig, SdpBound, gw_maxcut};
 use maxcut_sdp::sdp::bm::{BmSolver, BmSolverConfig};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -60,18 +61,23 @@ fn seeded_bm_runs() -> &'static [(Vec<bool>, f64, SdpBound)] {
     static RUNS_ONCE: OnceLock<Vec<(Vec<bool>, f64, SdpBound)>> = OnceLock::new();
     RUNS_ONCE.get_or_init(|| {
         let graph = sparse_random_graph(3000, 42);
-        let config = GwBmConfig {
-            num_trials: NonZeroUsize::MIN,
-            ils_rounds: 0,
-            num_restarts: NonZeroUsize::MIN,
+        let config = GwConfig {
+            plan: TrialPlan {
+                num_trials: NonZeroUsize::MIN,
+                ils_rounds: 0,
+                ..TrialPlan::default()
+            },
             seed: Some(9),
-            ..GwBmConfig::default()
+            backend: Backend::Bm(BmConfig {
+                num_restarts: NonZeroUsize::MIN,
+                ..BmConfig::default()
+            }),
         };
         (0..RUNS)
             .map(|_| {
-                let r = gw_maxcut_bm(&graph, &config, |_| {})
-                    .unwrap_or_else(|e| panic!("gw_maxcut_bm failed: {e}"));
-                (r.partition, r.cut_value, r.sdp_bound)
+                let r = gw_maxcut(&graph, &config, |_| {})
+                    .unwrap_or_else(|e| panic!("gw_maxcut failed: {e}"));
+                (r.cut.partition, r.cut.cut_value, r.sdp_bound)
             })
             .collect()
     })
