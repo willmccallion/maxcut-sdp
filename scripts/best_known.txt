@@ -1,0 +1,25 @@
+# Best known cut values: instance name, then value.
+# Biq Mac optima from the Biq Mac Library; Gset values from BLS, MCPG,
+# CirCut and recent literature.
+g05_60.0 536
+g05_60.1 532
+g05_80.0 934
+g05_80.1 942
+g05_100.0 1430
+G1 11624
+G2 11620
+G3 11622
+G11 564
+G14 3064
+G22 13359
+G35 7687
+G43 6660
+G48 6000
+G55 10299
+G58 19293
+G60 14188
+G63 27047
+G67 6950
+G70 9591
+G77 9940
+G81 14060
