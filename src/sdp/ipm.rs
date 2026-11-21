@@ -31,6 +31,9 @@ const SCHUR_REGULARIZATION: f64 = 1e-12;
 /// Centering parameter `σ`: each step targets `μ_next = σ μ`. See [`MATH.md`](./MATH.md) §3.6.
 const CENTERING: f64 = 0.2;
 
+/// The IPM's default tolerance on its relative gap and infeasibilities.
+pub const DEFAULT_EPSILON: f64 = 1e-8;
+
 /// Configuration for the interior point solver.
 #[derive(Debug, Clone)]
 pub struct IpmConfig {
@@ -47,7 +50,7 @@ impl Default for IpmConfig {
     fn default() -> Self {
         Self {
             max_iterations: 100,
-            epsilon: 1e-8,
+            epsilon: DEFAULT_EPSILON,
             step_safety: 0.99,
         }
     }

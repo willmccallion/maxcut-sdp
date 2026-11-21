@@ -7,18 +7,22 @@ use std::time::{Duration, Instant};
 
 use common::sparse_random_graph;
 use maxcut_sdp::graph::Graph;
-use maxcut_sdp::maxcut::{GwBmConfig, gw_maxcut_bm};
+use maxcut_sdp::maxcut::rounding::TrialPlan;
+use maxcut_sdp::maxcut::{Backend, BmConfig, GwConfig, gw_maxcut};
 
 fn elapsed_with_budget(graph: &Graph, num_restarts: usize, budget: Duration) -> Duration {
-    let config = GwBmConfig {
-        num_restarts: NonZeroUsize::new(num_restarts).unwrap_or_else(|| panic!("no restarts")),
+    let config = GwConfig {
         seed: Some(1),
-        time_limit: Some(budget),
-        ..GwBmConfig::default()
+        backend: Backend::Bm(BmConfig {
+            num_restarts: NonZeroUsize::new(num_restarts).unwrap_or_else(|| panic!("no restarts")),
+            time_limit: Some(budget),
+            ..BmConfig::default()
+        }),
+        ..GwConfig::default()
     };
 
     let start = Instant::now();
-    let result = gw_maxcut_bm(graph, &config, |_| {});
+    let result = gw_maxcut(graph, &config, |_| {});
     let elapsed = start.elapsed();
 
     if let Err(e) = result {
@@ -64,17 +68,22 @@ fn time_limit_is_checked_between_restarts() {
 fn a_time_limit_never_runs_more_restarts_than_asked() {
     let graph = sparse_random_graph(30, 7);
     let trials_per_restart = NonZeroUsize::new(10).unwrap_or_else(|| panic!("10 trials"));
-    let config = GwBmConfig {
-        num_trials: trials_per_restart,
-        ils_rounds: 5,
-        num_restarts: NonZeroUsize::new(2).unwrap_or_else(|| panic!("2 restarts")),
+    let config = GwConfig {
+        plan: TrialPlan {
+            num_trials: trials_per_restart,
+            ils_rounds: 5,
+            ..TrialPlan::default()
+        },
         seed: Some(1),
-        time_limit: Some(Duration::from_secs(2)),
-        ..GwBmConfig::default()
+        backend: Backend::Bm(BmConfig {
+            num_restarts: NonZeroUsize::new(2).unwrap_or_else(|| panic!("2 restarts")),
+            time_limit: Some(Duration::from_secs(2)),
+            ..BmConfig::default()
+        }),
     };
 
     let result =
-        gw_maxcut_bm(&graph, &config, |_| {}).unwrap_or_else(|e| panic!("solver failed: {e}"));
+        gw_maxcut(&graph, &config, |_| {}).unwrap_or_else(|e| panic!("solver failed: {e}"));
 
     assert_eq!(result.num_trials, 2 * trials_per_restart.get());
 }
@@ -84,22 +93,25 @@ fn a_time_limit_never_runs_more_restarts_than_asked() {
 #[test]
 fn refinement_never_loses_the_rounded_cut() {
     let graph = sparse_random_graph(300, 7);
-    let config = |time_limit| GwBmConfig {
+    let config = |time_limit| GwConfig {
         seed: Some(3),
-        time_limit,
-        ..GwBmConfig::default()
+        backend: Backend::Bm(BmConfig {
+            time_limit,
+            ..BmConfig::default()
+        }),
+        ..GwConfig::default()
     };
 
-    let untimed = gw_maxcut_bm(&graph, &config(None), |_| {});
-    let timed = gw_maxcut_bm(&graph, &config(Some(Duration::from_secs(1))), |_| {});
+    let untimed = gw_maxcut(&graph, &config(None), |_| {});
+    let timed = gw_maxcut(&graph, &config(Some(Duration::from_secs(1))), |_| {});
 
     let untimed = untimed.unwrap_or_else(|e| panic!("untimed run failed: {e}"));
     let timed = timed.unwrap_or_else(|e| panic!("timed run failed: {e}"));
     assert!(
-        timed.cut_value >= untimed.cut_value,
+        timed.cut.cut_value >= untimed.cut.cut_value,
         "{} < {}",
-        timed.cut_value,
-        untimed.cut_value
+        timed.cut.cut_value,
+        untimed.cut.cut_value
     );
-    assert_eq!(timed.cut_value, graph.cut_value(&timed.partition));
+    assert_eq!(timed.cut.cut_value, graph.cut_value(&timed.cut.partition));
 }

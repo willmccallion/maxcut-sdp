@@ -103,7 +103,7 @@ impl<'a, P: FnMut(Progress)> BmPipeline<'a, P> {
             relaxation: first.relaxation,
             vectors: first.vectors,
             pool: first.pool,
-            num_trials: self.plan.trials.get(),
+            num_trials: self.plan.num_trials.get(),
         };
         self.report_restart(
             1,
@@ -125,7 +125,7 @@ impl<'a, P: FnMut(Progress)> BmPipeline<'a, P> {
             }
             let next = self.run_restart(rng)?;
             let (relaxation, cut) = (next.relaxation, next.pool[0].cut_value);
-            outcome.absorb(next, self.plan.trials.get());
+            outcome.absorb(next, self.plan.num_trials.get());
             self.report_restart(restart + 1, restarts, relaxation, cut, &outcome);
             last_restart = restart_start.elapsed();
         }

@@ -492,6 +492,6 @@ is not too loose on this instance.
 | 3. Solve SDP via IPM, or via Burer-Monteiro for large graphs | `sdp/ipm.rs`, `sdp/bm.rs` | `IpmSolver::solve()`, `BmSolver::solve_maxcut()` |
 | 4. Certify the upper bound from a dual solution | `maxcut/mod.rs` | `certified_bound()` |
 | 5. Extract vectors via Cholesky: $X^{*} = V^\top V$ (IPM only) | `maxcut/rounding.rs` | `extract_vectors()` |
-| 6. Hyperplane or outward rotation rounding ($k$ trials) | `maxcut/rounding.rs` | `multi_round()`, `multi_round_with_pool()` |
+| 6. Hyperplane or outward rotation rounding ($k$ trials) | `maxcut/rounding.rs` | `round_trials()`, `multi_round()`, `best_cuts()` |
 | 7. Iterated local search (per trial) | `maxcut/rounding.rs` | `iterated_local_search()` |
-| 8. Return best partition and approximation ratio | `maxcut/mod.rs` | `gw_maxcut()`, `gw_maxcut_bm()` |
+| 8. Return best partition and approximation ratio | `maxcut/mod.rs` | `gw_maxcut()` |

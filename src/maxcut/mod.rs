@@ -24,7 +24,7 @@ use std::time::Duration;
 use crate::GwError;
 use crate::graph::Graph;
 use crate::maxcut::bm_pipeline::{BmPipeline, Budget};
-use crate::maxcut::rounding::{Rounding, TrialPlan};
+use crate::maxcut::rounding::TrialPlan;
 use crate::sdp::bm::{BmProgress, BmSolverConfig};
 use crate::sdp::ipm::{IpmConfig, IpmSolver};
 use crate::sdp::linalg::{DenseMatrix, col, dot};
@@ -44,13 +44,11 @@ pub struct Cut {
 /// The result of running the Goemans-Williamson algorithm.
 #[derive(Debug, Clone)]
 pub struct MaxCutResult {
-    /// The vertex partition: `partition[i] = true` means vertex `i` is in set `S`.
-    pub partition: Vec<bool>,
-    /// The cut value (total weight of edges crossing the partition).
-    pub cut_value: f64,
+    /// The best cut found.
+    pub cut: Cut,
     /// What the SDP relaxation established about the optimal cut.
     pub sdp_bound: SdpBound,
-    /// The approximation ratio `cut_value / sdp_bound`, or `None` when the
+    /// The approximation ratio `cut.cut_value / sdp_bound`, or `None` when the
     /// bound is uncertified or zero and no ratio exists.
     pub approximation_ratio: Option<f64>,
     /// Number of rounding trials performed.
@@ -157,48 +155,85 @@ pub const DEFAULT_RESTARTS: NonZeroUsize = match NonZeroUsize::new(3) {
     None => NonZeroUsize::MIN,
 };
 
+/// Iterated local search rounds per rounding trial by default.
+pub const DEFAULT_ILS_ROUNDS: usize = 50;
+
+/// Largest graph [`Backend::Auto`] solves with the IPM, whose `O(n³)`
+/// iterations take seconds here and grow impractical soon after.
+pub const AUTO_IPM_MAX_VERTICES: usize = 100;
+
 /// Configuration for the GW algorithm.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct GwConfig {
-    /// Number of independent rounding trials.
-    pub num_trials: NonZeroUsize,
-    /// Number of iterated local search rounds per rounding trial.
-    pub ils_rounds: usize,
-    /// How each trial rounds the SDP vectors.
-    pub rounding: Rounding,
-    /// Configuration for the underlying SDP solver.
-    pub solver_config: IpmConfig,
-    /// Optional RNG seed for reproducibility.
+    /// The rounding trials, per BM restart with BM.
+    pub plan: TrialPlan,
+    /// RNG seed for reproducibility, used by BM's starts and the rounding.
     pub seed: Option<u64>,
+    /// The SDP solver and its configuration.
+    pub backend: Backend,
 }
 
-impl Default for GwConfig {
-    fn default() -> Self {
-        Self {
-            num_trials: DEFAULT_TRIALS,
-            ils_rounds: 50,
-            rounding: Rounding::default(),
-            solver_config: IpmConfig::default(),
-            seed: None,
+/// The SDP solver a run uses.
+#[derive(Debug, Clone, Default)]
+pub enum Backend {
+    /// The IPM, with its default configuration, up to
+    /// [`AUTO_IPM_MAX_VERTICES`], and BM, with its, past it.
+    #[default]
+    Auto,
+    /// The primal-dual interior point method: dense, `O(n³)` per iteration.
+    Ipm(IpmConfig),
+    /// Burer-Monteiro: `O(|E|·r)` per iteration, for large sparse graphs.
+    Bm(BmConfig),
+}
+
+/// The kind of SDP solver, whatever its configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackendKind {
+    /// The interior point method.
+    Ipm,
+    /// Burer-Monteiro.
+    Bm,
+}
+
+impl BackendKind {
+    /// The solver [`Backend::Auto`] picks for a graph of `vertices` vertices.
+    pub const fn auto_for(vertices: usize) -> Self {
+        if vertices <= AUTO_IPM_MAX_VERTICES {
+            Self::Ipm
+        } else {
+            Self::Bm
         }
     }
 }
 
-/// Configuration for the GW algorithm using the Burer-Monteiro solver.
+impl Backend {
+    /// This backend's configuration for a graph of `vertices` vertices,
+    /// choosing a solver if it is [`Backend::Auto`].
+    fn resolve(&self, vertices: usize) -> Solver {
+        match self {
+            Self::Auto => match BackendKind::auto_for(vertices) {
+                BackendKind::Ipm => Solver::Ipm(IpmConfig::default()),
+                BackendKind::Bm => Solver::Bm(BmConfig::default()),
+            },
+            Self::Ipm(config) => Solver::Ipm(config.clone()),
+            Self::Bm(config) => Solver::Bm(config.clone()),
+        }
+    }
+}
+
+/// A backend with its solver chosen.
+enum Solver {
+    Ipm(IpmConfig),
+    Bm(BmConfig),
+}
+
+/// Configuration for the Burer-Monteiro backend.
 #[derive(Debug, Clone)]
-pub struct GwBmConfig {
-    /// Number of independent rounding trials per BM restart.
-    pub num_trials: NonZeroUsize,
-    /// Number of iterated local search rounds per rounding trial.
-    pub ils_rounds: usize,
-    /// How each trial rounds the SDP vectors.
-    pub rounding: Rounding,
-    /// Configuration for the BM solver.
-    pub solver_config: BmSolverConfig,
+pub struct BmConfig {
+    /// Configuration for each BM solve.
+    pub solver: BmSolverConfig,
     /// BM solves from independent random starts, each rounded separately.
     pub num_restarts: NonZeroUsize,
-    /// Optional RNG seed for reproducibility (used for both solver and rounding).
-    pub seed: Option<u64>,
     /// Optional time budget. When set, a restart after the first starts only
     /// if, taking as long as the one before, it would finish within the
     /// budget, and whatever time is left refines the best cuts with iterated
@@ -207,84 +242,73 @@ pub struct GwBmConfig {
     pub time_limit: Option<Duration>,
 }
 
-impl Default for GwBmConfig {
+impl Default for BmConfig {
     fn default() -> Self {
         Self {
-            num_trials: DEFAULT_TRIALS,
-            ils_rounds: 50,
-            rounding: Rounding::default(),
-            solver_config: BmSolverConfig::default(),
+            solver: BmSolverConfig::default(),
             num_restarts: DEFAULT_RESTARTS,
-            seed: None,
             time_limit: None,
         }
     }
 }
 
-/// Runs the full Goemans-Williamson Max-Cut algorithm.
+/// Runs the Goemans-Williamson Max-Cut algorithm, reporting progress to
+/// `on_progress`.
 ///
-/// Given a weighted undirected graph, this function:
-/// 1. Builds the SDP relaxation (cost matrix `C = -(1/4)L`, diagonal constraints)
-/// 2. Solves the SDP via primal-dual interior point method
-/// 3. Rounds the solution `k` times using random hyperplanes
-/// 4. Returns the best partition found
-///
-/// See [`MATH.md`](./MATH.md) §10 for the implementation checklist.
-///
-/// # Errors
-///
-/// Returns an error if the SDP solver fails or the graph is empty.
-pub fn gw_maxcut(graph: &Graph, config: &GwConfig) -> Result<MaxCutResult, GwError> {
-    let problem = SdpProblem::maxcut_relaxation(graph)?;
-    let solution = IpmSolver::new(config.solver_config.clone()).solve(&problem)?;
-    // The converged dual is feasible only to within the tolerance, so its
-    // objective is certified rather than taken as it stands.
-    let sdp_bound = SdpBound::Certified(certified_bound(problem.into_cost(), &solution.y)?);
-
-    let mut rng = seeded_rng(config.seed);
-    let plan = TrialPlan {
-        trials: config.num_trials,
-        ils_rounds: config.ils_rounds,
-        rounding: config.rounding,
-    };
-    let best = rounding::multi_round(&solution.x, graph, plan, &mut rng)?;
-    Ok(max_cut_result(graph, best, sdp_bound, plan.trials.get()))
-}
-
-/// Runs the GW Max-Cut algorithm using the Burer-Monteiro low-rank solver,
-/// reporting progress to `on_progress`.
-///
-/// This is the recommended path for large or sparse graphs (n > 100).
-/// Per-iteration cost is O(|E|·r) instead of O(n³) for the dense IPM.
-///
-/// Each BM restart produces a different SDP solution with different vector
-/// geometry. Rounding is performed from each restart's vectors independently,
-/// and the best cut across all restarts is returned.
+/// Solves the SDP relaxation with the configured backend, rounds its
+/// vectors in `config.plan`'s trials, each improved by iterated local
+/// search, and returns the best cut with the bound the SDP certifies.
+/// BM rounds after each of its restarts and, with a time limit, refines the
+/// best cuts until it runs out. See [`MATH.md`](./MATH.md) §10.
 ///
 /// # Errors
 ///
 /// Returns an error if the graph is empty or the solver fails.
-pub fn gw_maxcut_bm(
+pub fn gw_maxcut(
     graph: &Graph,
-    config: &GwBmConfig,
+    config: &GwConfig,
     on_progress: impl FnMut(Progress),
 ) -> Result<MaxCutResult, GwError> {
     let mut rng = seeded_rng(config.seed);
-    let plan = TrialPlan {
-        trials: config.num_trials,
-        ils_rounds: config.ils_rounds,
-        rounding: config.rounding,
-    };
-    let budget = Budget::start(config.time_limit);
-    let mut pipeline = BmPipeline::new(
-        graph,
-        config.solver_config.clone(),
-        plan,
-        budget,
-        on_progress,
-    );
+    match config.backend.resolve(graph.num_vertices()) {
+        Solver::Ipm(ipm) => ipm_maxcut(graph, &ipm, config.plan, &mut rng),
+        Solver::Bm(bm) => bm_maxcut(graph, &bm, config.plan, &mut rng, on_progress),
+    }
+}
 
-    let restarts = pipeline.run_restarts(config.num_restarts.get(), &mut rng)?;
+/// GW with the IPM, whose converged dual is feasible only to within the
+/// tolerance, so its objective is certified rather than taken as it stands.
+fn ipm_maxcut(
+    graph: &Graph,
+    config: &IpmConfig,
+    plan: TrialPlan,
+    rng: &mut StdRng,
+) -> Result<MaxCutResult, GwError> {
+    let problem = SdpProblem::maxcut_relaxation(graph)?;
+    let solution = IpmSolver::new(config.clone()).solve(&problem)?;
+    let sdp_bound = SdpBound::Certified(certified_bound(problem.into_cost(), &solution.y)?);
+    let best = rounding::multi_round(&solution.x, graph, plan, rng)?;
+    Ok(max_cut_result(
+        graph,
+        best,
+        sdp_bound,
+        plan.num_trials.get(),
+    ))
+}
+
+/// GW with BM: restarts, the bound of the best relaxation, then refinement
+/// if there is a time limit.
+fn bm_maxcut(
+    graph: &Graph,
+    config: &BmConfig,
+    plan: TrialPlan,
+    rng: &mut StdRng,
+    on_progress: impl FnMut(Progress),
+) -> Result<MaxCutResult, GwError> {
+    let budget = Budget::start(config.time_limit);
+    let mut pipeline = BmPipeline::new(graph, config.solver.clone(), plan, budget, on_progress);
+
+    let restarts = pipeline.run_restarts(config.num_restarts.get(), rng)?;
     let sdp_bound = bm_bound(graph, restarts.relaxation, &restarts.vectors)?;
     if let SdpBound::Certified(bound) = sdp_bound {
         (pipeline.on_progress)(Progress::Certified {
@@ -293,7 +317,7 @@ pub fn gw_maxcut_bm(
         });
     }
     let best = match pipeline.budget.deadline() {
-        Some(deadline) => pipeline.refine_until(deadline, restarts.pool, restarts.best, &mut rng),
+        Some(deadline) => pipeline.refine_until(deadline, restarts.pool, restarts.best, rng),
         None => restarts.best,
     };
     Ok(max_cut_result(graph, best, sdp_bound, restarts.num_trials))
@@ -313,8 +337,7 @@ fn max_cut_result(
 ) -> MaxCutResult {
     MaxCutResult {
         approximation_ratio: sdp_bound.ratio(best.cut_value, graph.total_abs_weight()),
-        partition: best.partition,
-        cut_value: best.cut_value,
+        cut: best,
         sdp_bound,
         num_trials,
     }
@@ -393,6 +416,22 @@ mod tests {
             g.add_edge(u, v, 1.0).unwrap_or_else(|e| panic!("{e}"));
         }
         g
+    }
+
+    #[test]
+    fn auto_runs_the_ipm_up_to_its_limit() {
+        assert_eq!(
+            BackendKind::auto_for(AUTO_IPM_MAX_VERTICES),
+            BackendKind::Ipm
+        );
+    }
+
+    #[test]
+    fn auto_runs_bm_past_the_ipm_limit() {
+        assert_eq!(
+            BackendKind::auto_for(AUTO_IPM_MAX_VERTICES + 1),
+            BackendKind::Bm
+        );
     }
 
     #[test]

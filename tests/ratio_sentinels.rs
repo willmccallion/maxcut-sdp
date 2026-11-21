@@ -4,25 +4,18 @@ mod common;
 
 use common::{cycle, triangle};
 use maxcut_sdp::graph::Graph;
-use maxcut_sdp::maxcut::{GwBmConfig, GwConfig, gw_maxcut, gw_maxcut_bm};
+use maxcut_sdp::maxcut::{Backend, BmConfig, GwConfig, gw_maxcut};
+use maxcut_sdp::sdp::ipm::IpmConfig;
 
 /// The ratio each solver reports for `graph`: `[IPM, BM]`.
 fn ratios(graph: &Graph) -> [Option<f64>; 2] {
-    let ipm = gw_maxcut(
-        graph,
-        &GwConfig {
-            seed: Some(1),
-            ..GwConfig::default()
-        },
-    );
-    let bm = gw_maxcut_bm(
-        graph,
-        &GwBmConfig {
-            seed: Some(1),
-            ..GwBmConfig::default()
-        },
-        |_| {},
-    );
+    let config = |backend| GwConfig {
+        seed: Some(1),
+        backend,
+        ..GwConfig::default()
+    };
+    let ipm = gw_maxcut(graph, &config(Backend::Ipm(IpmConfig::default())), |_| {});
+    let bm = gw_maxcut(graph, &config(Backend::Bm(BmConfig::default())), |_| {});
     let ipm = ipm.unwrap_or_else(|e| panic!("ipm failed: {e}"));
     let bm = bm.unwrap_or_else(|e| panic!("bm failed: {e}"));
     [ipm.approximation_ratio, bm.approximation_ratio]
