@@ -33,7 +33,7 @@ const CENTERING: f64 = 0.2;
 
 /// Configuration for the interior point solver.
 #[derive(Debug, Clone)]
-pub struct SolverConfig {
+pub struct IpmConfig {
     /// Maximum number of IPM iterations before giving up.
     pub max_iterations: usize,
     /// Convergence tolerance for the duality gap.
@@ -42,7 +42,7 @@ pub struct SolverConfig {
     pub step_safety: f64,
 }
 
-impl Default for SolverConfig {
+impl Default for IpmConfig {
     fn default() -> Self {
         Self {
             max_iterations: 100,
@@ -54,13 +54,13 @@ impl Default for SolverConfig {
 
 /// The primal-dual interior point SDP solver.
 #[derive(Debug)]
-pub struct Solver {
-    config: SolverConfig,
+pub struct IpmSolver {
+    config: IpmConfig,
 }
 
-impl Solver {
+impl IpmSolver {
     /// Creates a new solver with the given configuration.
-    pub const fn new(config: SolverConfig) -> Self {
+    pub const fn new(config: IpmConfig) -> Self {
         Self { config }
     }
 

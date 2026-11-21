@@ -128,8 +128,8 @@ src/
 ├── parser.rs            Biq Mac and DIMACS format parsers
 ├── sdp/
 │   ├── mod.rs           SDP problem formulation
-│   ├── solver.rs        Primal-dual interior point method
-│   ├── solver_bm.rs     Burer-Monteiro low-rank solver
+│   ├── ipm.rs           Primal-dual interior point method
+│   ├── bm.rs            Burer-Monteiro low-rank solver
 │   ├── linalg.rs        Dense linear algebra (Cholesky, eigendecomp, etc.)
 │   └── MATH.md          Mathematical reference
 └── maxcut/

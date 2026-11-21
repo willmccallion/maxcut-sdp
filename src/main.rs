@@ -16,8 +16,8 @@ use maxcut_sdp::maxcut::{
     gw_maxcut_bm,
 };
 use maxcut_sdp::parser::{parse_auto, parse_biqmac, parse_dimacs};
-use maxcut_sdp::sdp::solver::SolverConfig;
-use maxcut_sdp::sdp::solver_bm::BmSolverConfig;
+use maxcut_sdp::sdp::bm::BmSolverConfig;
+use maxcut_sdp::sdp::ipm::IpmConfig;
 
 /// Goemans-Williamson Max-Cut approximation via semidefinite programming.
 #[derive(Parser, Debug)]
@@ -170,9 +170,9 @@ fn run(cli: &Cli) -> Result<(), GwError> {
                 num_trials: cli.trials,
                 ils_rounds: cli.ils_rounds,
                 rounding,
-                solver_config: SolverConfig {
+                solver_config: IpmConfig {
                     epsilon: cli.epsilon,
-                    ..SolverConfig::default()
+                    ..IpmConfig::default()
                 },
                 seed: cli.seed,
             };

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use common::sparse_random_graph;
 use maxcut_sdp::graph::Graph;
 use maxcut_sdp::maxcut::{GwBmConfig, gw_maxcut_bm};
-use maxcut_sdp::sdp::solver_bm::BmSolverConfig;
+use maxcut_sdp::sdp::bm::BmSolverConfig;
 
 fn elapsed_with_budget(graph: &Graph, num_restarts: usize, budget: Duration) -> Duration {
     let config = GwBmConfig {

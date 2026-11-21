@@ -7,7 +7,7 @@ use maxcut_sdp::GwError;
 use maxcut_sdp::graph::Graph;
 use maxcut_sdp::maxcut::rounding::Rounding;
 use maxcut_sdp::maxcut::{GwBmConfig, gw_maxcut_bm};
-use maxcut_sdp::sdp::solver_bm::BmSolverConfig;
+use maxcut_sdp::sdp::bm::BmSolverConfig;
 use std::num::NonZeroUsize;
 
 /// Full GW pipeline with BM on C5: cut >= `α_GW` · OPT.

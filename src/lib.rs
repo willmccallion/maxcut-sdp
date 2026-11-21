@@ -25,7 +25,7 @@ use std::fmt;
 // Re-exports of key public types.
 pub use graph::Graph;
 pub use maxcut::MaxCutResult;
-pub use sdp::solver_bm::{BmSolution, BmSolver, BmSolverConfig};
+pub use sdp::bm::{BmSolution, BmSolver, BmSolverConfig};
 pub use sdp::{SdpProblem, SdpSolution};
 
 /// Errors that can occur throughout the maxcut-sdp pipeline.
