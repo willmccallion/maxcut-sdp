@@ -374,13 +374,6 @@ impl DenseMatrix {
         }
     }
 
-    /// Multiplies every element by `scalar` in-place.
-    pub fn scale_assign(&mut self, scalar: f64) {
-        for x in &mut self.data {
-            *x *= scalar;
-        }
-    }
-
     /// Computes the Frobenius inner product `⟨self, other⟩ = tr(self^T · other)`.
     ///
     /// Equal to the dot product of the flattened data vectors — computed as a
