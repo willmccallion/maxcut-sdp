@@ -202,6 +202,36 @@ pub fn one_flip_local_search(partition: &mut [bool], graph: &Graph) -> f64 {
 /// largest comes once per cycle.
 pub const PERTURBATION_CYCLE_ROUNDS: usize = 20;
 
+/// Every this many rounds a medium perturbation replaces a small one.
+const MEDIUM_PERTURBATION_PERIOD: usize = 5;
+
+/// A small, medium or large perturbation flips `n` over this many vertices.
+const SMALL_PERTURBATION_DIVISOR: usize = 100;
+const MEDIUM_PERTURBATION_DIVISOR: usize = 10;
+const LARGE_PERTURBATION_DIVISOR: usize = 3;
+
+/// The vertices round `round` of iterated local search flips in an
+/// `n`-vertex graph: `n/3` at the end of each cycle, `n/10` every fifth
+/// round otherwise, `n/100` the rest, and at least one.
+fn perturbation_size(round: usize, n: usize) -> usize {
+    let divisor = if round % PERTURBATION_CYCLE_ROUNDS == PERTURBATION_CYCLE_ROUNDS - 1 {
+        LARGE_PERTURBATION_DIVISOR
+    } else if round % MEDIUM_PERTURBATION_PERIOD == MEDIUM_PERTURBATION_PERIOD - 1 {
+        MEDIUM_PERTURBATION_DIVISOR
+    } else {
+        SMALL_PERTURBATION_DIVISOR
+    };
+    1.max(n / divisor)
+}
+
+/// Flips `count` vertices of `partition` drawn at random, with repeats.
+fn perturb(partition: &mut [bool], count: usize, rng: &mut impl Rng) {
+    for _ in 0..count {
+        let v = rng.random_range(0..partition.len());
+        partition[v] = !partition[v];
+    }
+}
+
 /// Iterated local search: escapes 1-flip local optima via random perturbation.
 ///
 /// Starting from a partition (not necessarily a local optimum), performs
@@ -228,10 +258,6 @@ pub fn iterated_local_search_until(
     rng: &mut impl Rng,
 ) -> (f64, usize) {
     let n = graph.num_vertices();
-    let k_small = 1_usize.max(n / 100);
-    let k_medium = 1_usize.max(n / 10);
-    let k_large = 1_usize.max(n / 3);
-
     let mut best_cut = one_flip_local_search(partition, graph);
     let mut best_partition = partition.to_vec();
 
@@ -241,22 +267,8 @@ pub fn iterated_local_search_until(
             break;
         }
         rounds_run += 1;
-        // Tiered perturbation: small most of the time, medium every 5th,
-        // large every 20th to break out of deep basins.
-        let k = if round % PERTURBATION_CYCLE_ROUNDS == PERTURBATION_CYCLE_ROUNDS - 1 {
-            k_large
-        } else if round % 5 == 4 {
-            k_medium
-        } else {
-            k_small
-        };
-
         let mut candidate = best_partition.clone();
-        for _ in 0..k {
-            let v: usize = rng.random_range(0..n);
-            candidate[v] = !candidate[v];
-        }
-
+        perturb(&mut candidate, perturbation_size(round, n), rng);
         let cut = one_flip_local_search(&mut candidate, graph);
 
         if cut > best_cut {
@@ -459,6 +471,26 @@ mod tests {
                 .take(first_best(&cuts))
                 .all(|cut| cut.cut_value < best.cut_value)
         );
+    }
+
+    #[test]
+    fn perturbations_grow_every_fifth_round_and_peak_once_per_cycle() {
+        let sizes: Vec<usize> = (0..PERTURBATION_CYCLE_ROUNDS)
+            .map(|round| perturbation_size(round, 3000))
+            .collect();
+
+        let mut expected = vec![30; PERTURBATION_CYCLE_ROUNDS];
+        for medium in [4, 9, 14] {
+            expected[medium] = 300;
+        }
+        expected[19] = 1000;
+        assert_eq!(sizes, expected);
+        assert_eq!(perturbation_size(PERTURBATION_CYCLE_ROUNDS, 3000), 30);
+    }
+
+    #[test]
+    fn a_small_graph_still_perturbs_one_vertex() {
+        assert_eq!(perturbation_size(0, 5), 1);
     }
 
     fn angle(radians: f64) -> RotationAngle {
