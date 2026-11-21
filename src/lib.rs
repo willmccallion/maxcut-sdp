@@ -49,6 +49,9 @@ pub enum GwError {
         cause: Box<Self>,
     },
 
+    /// A configuration value does not fit the problem it is used on.
+    InvalidConfig(String),
+
     /// Failed to parse an input file.
     ParseError(String),
 
@@ -80,6 +83,7 @@ impl fmt::Display for GwError {
             Self::InvalidMatrix(msg) => write!(f, "invalid matrix: {msg}"),
             Self::SolverFailed(msg) => write!(f, "solver failed: {msg}"),
             Self::SolverStep { stage, cause } => write!(f, "solver failed at {stage}: {cause}"),
+            Self::InvalidConfig(msg) => write!(f, "invalid configuration: {msg}"),
             Self::ParseError(msg) => write!(f, "parse error: {msg}"),
             Self::NotPositiveDefinite => write!(f, "matrix is not positive definite"),
             Self::DimensionMismatch { expected, got } => {

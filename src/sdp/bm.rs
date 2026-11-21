@@ -31,7 +31,8 @@ use rayon::prelude::*;
 /// Configuration for the Burer-Monteiro solver.
 #[derive(Debug, Clone)]
 pub struct BmSolverConfig {
-    /// Rank of the factorization. `None` = ⌈√(2n)⌉, clamped to [2, n].
+    /// Rank of the factorization, within `2..=n`. `None` means `⌈√(2n)⌉`,
+    /// clamped to that range.
     pub rank: Option<usize>,
     /// Maximum gradient descent iterations per restart.
     pub max_iterations: usize,
@@ -94,7 +95,8 @@ impl BmSolver {
     ///
     /// # Errors
     ///
-    /// Returns an error if the graph is empty.
+    /// Returns [`GwError::InvalidGraph`] if the graph is empty, and
+    /// [`GwError::InvalidConfig`] if the configured rank is outside `2..=n`.
     pub fn solve_maxcut(
         &self,
         graph: &Graph,
@@ -105,19 +107,23 @@ impl BmSolver {
         if n == 0 {
             return Err(GwError::InvalidGraph("empty graph".into()));
         }
-        let r = self.factor_rank(n);
+        let r = self.factor_rank(n)?;
         let edges = column_edges(graph, r);
         let start = random_unit_vectors(n, r, rng);
         Ok(self.descend(&edges, start, &mut on_progress))
     }
 
-    /// The configured rank, or `⌈√(2n)⌉`, clamped to `[2, n]`.
-    fn factor_rank(&self, n: usize) -> usize {
-        let r = self
-            .config
-            .rank
-            .unwrap_or_else(|| ((2.0 * n as f64).sqrt()).ceil() as usize);
-        r.max(2).min(n)
+    /// The configured rank, or by default `⌈√(2n)⌉` clamped to `[2, n]`.
+    fn factor_rank(&self, n: usize) -> Result<usize, GwError> {
+        let Some(rank) = self.config.rank else {
+            return Ok((((2.0 * n as f64).sqrt()).ceil() as usize).max(2).min(n));
+        };
+        if !(2..=n).contains(&rank) {
+            return Err(GwError::InvalidConfig(format!(
+                "BM rank {rank} is outside 2..={n} for a {n}-vertex graph"
+            )));
+        }
+        Ok(rank)
     }
 
     /// Runs conjugate gradient from `start` until the gradient vanishes, the
