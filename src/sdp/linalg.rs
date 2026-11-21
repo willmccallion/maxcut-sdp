@@ -251,6 +251,27 @@ impl DenseMatrix {
         Ok(c)
     }
 
+    /// The congruence `self · middle · self`, multiplied left to right.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GwError::DimensionMismatch`] if the shapes do not chain.
+    pub(crate) fn congruence(&self, middle: &Self) -> Result<Self, GwError> {
+        self.mul(middle)?.mul(self)
+    }
+
+    /// Makes a square matrix exactly symmetric: `A ← (A + Aᵀ) / 2`.
+    pub(crate) fn symmetrize(&mut self) {
+        let n = self.rows;
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let avg = f64::midpoint(self.data[idx(i, j, n)], self.data[idx(j, i, n)]);
+                self.data[idx(i, j, n)] = avg;
+                self.data[idx(j, i, n)] = avg;
+            }
+        }
+    }
+
     /// Computes `self * other^T` efficiently for symmetric products.
     ///
     /// Avoids forming the explicit transpose. Both matrices accessed column-wise.
