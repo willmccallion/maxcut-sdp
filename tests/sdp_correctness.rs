@@ -88,3 +88,19 @@ fn stopping_before_convergence_is_an_error() {
 
     assert!(matches!(result, Err(GwError::SolverFailed(_))));
 }
+
+#[test]
+fn a_problem_refuses_a_constraint_of_another_size() {
+    let mut problem = SdpProblem::new(DenseMatrix::identity(2));
+
+    let added = problem.add_constraint(ConstraintMatrix::DiagonalUnit(2), 1.0);
+
+    assert!(matches!(added, Err(GwError::InvalidMatrix(_))));
+}
+
+#[test]
+fn the_empty_graph_has_no_relaxation() {
+    let problem = SdpProblem::maxcut_relaxation(&Graph::new(0));
+
+    assert!(matches!(problem, Err(GwError::InvalidGraph(_))));
+}
