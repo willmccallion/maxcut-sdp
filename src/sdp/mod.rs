@@ -189,7 +189,7 @@ impl SdpProblem {
     ///
     /// # Errors
     ///
-    /// Returns an error if graph Laplacian construction fails.
+    /// Returns [`GwError::InvalidGraph`] if the graph is empty.
     pub fn maxcut_relaxation(graph: &Graph) -> Result<Self, GwError> {
         let n = graph.num_vertices();
         if n == 0 {
@@ -198,7 +198,6 @@ impl SdpProblem {
 
         let mut problem = Self::new(maxcut_cost(graph))?;
 
-        // Diagonal constraints: tr(E_ii X) = X_ii = 1
         for i in 0..n {
             problem.add_constraint(ConstraintMatrix::DiagonalUnit(i), 1.0)?;
         }
