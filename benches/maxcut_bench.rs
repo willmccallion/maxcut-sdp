@@ -88,7 +88,7 @@ fn bench_bm(c: &mut Criterion) {
     let graph = sparse_random_graph(1000, 1);
     let solver = BmSolver::new(BmSolverConfig::default());
     let _ = group.bench_function("solve_sparse_1000", |b| {
-        b.iter(|| solver.solve_maxcut(&graph, &mut StdRng::seed_from_u64(1)));
+        b.iter(|| solver.solve_maxcut(&graph, &mut StdRng::seed_from_u64(1), |_| {}));
     });
     let config = GwBmConfig {
         seed: Some(1),

@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use crate::GwError;
 use crate::graph::Graph;
 use crate::maxcut::rounding::{Rounding, TrialPlan};
-use crate::sdp::bm::{BmSolver, BmSolverConfig};
+use crate::sdp::bm::{BmProgress, BmSolver, BmSolverConfig};
 use crate::sdp::ipm::{IpmConfig, IpmSolver};
 use crate::sdp::linalg::{DenseMatrix, col, dot};
 use crate::sdp::{SdpProblem, maxcut_cost};
@@ -142,6 +142,38 @@ fn bm_bound(graph: &Graph, relaxation: f64, vectors: &DenseMatrix) -> Result<Sdp
         maxcut_cost(graph),
         &y,
     )?))
+}
+
+/// Prints a BM solve's progress, with the best cut of earlier restarts.
+fn report_bm_progress(progress: BmProgress, best_cut: Option<f64>) {
+    match (progress, best_cut) {
+        (
+            BmProgress::Iteration {
+                iteration,
+                relaxation,
+                gradient_norm,
+            },
+            Some(best),
+        ) => eprintln!(
+            "  iter {iteration}: obj={relaxation:.4}, grad={gradient_norm:.2e}, best={best:.0}"
+        ),
+        (
+            BmProgress::Iteration {
+                iteration,
+                relaxation,
+                gradient_norm,
+            },
+            None,
+        ) => eprintln!("  iter {iteration}: obj={relaxation:.4}, grad={gradient_norm:.2e}"),
+        (
+            BmProgress::Finished {
+                iterations,
+                relaxation,
+                gradient_norm,
+            },
+            _,
+        ) => eprintln!("BM: iters={iterations}, obj={relaxation:.4}, grad={gradient_norm:.2e}"),
+    }
 }
 
 /// Whether a step expected to take `expected`, started at `now`, finishes by
@@ -314,12 +346,10 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
             eprintln!("Time limit: stopping after {restart}/{num_restarts} restarts");
             break;
         }
-        let ctx = if best_cut > f64::NEG_INFINITY {
-            Some(best_cut)
-        } else {
-            None
-        };
-        let solution = solver.solve_maxcut_with_context(graph, &mut rng, ctx)?;
+        let best_so_far = (best_cut > f64::NEG_INFINITY).then_some(best_cut);
+        let solution = solver.solve_maxcut(graph, &mut rng, |progress| {
+            report_bm_progress(progress, best_so_far);
+        })?;
         let relaxation = -solution.objective;
 
         let plan = TrialPlan {

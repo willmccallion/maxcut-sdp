@@ -20,7 +20,7 @@ fn same_seed_gives_bitwise_identical_bm_relaxation() {
     let runs: Vec<(usize, u64, Vec<u64>)> = (0..RUNS)
         .map(|_| {
             let mut rng = StdRng::seed_from_u64(5);
-            let Ok(solution) = solver.solve_maxcut(&graph, &mut rng) else {
+            let Ok(solution) = solver.solve_maxcut(&graph, &mut rng, |_| {}) else {
                 panic!("BM solve failed");
             };
             let vector_bits = solution
