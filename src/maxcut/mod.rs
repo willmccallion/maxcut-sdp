@@ -357,8 +357,11 @@ pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, 
             ils_rounds: config.ils_rounds,
             rounding: config.rounding,
         };
-        let (result, top_partitions) =
-            rounding::multi_round_with_pool(&solution.vectors, graph, plan, pool_size, &mut rng);
+        let top_partitions = rounding::best_cuts(
+            rounding::round_trials(&solution.vectors, graph, plan, &mut rng),
+            pool_size,
+        );
+        let result = top_partitions[0].clone();
         total_trials += config.num_trials.get();
         candidate_pool.extend(top_partitions);
 
