@@ -5,9 +5,9 @@
 //!
 //! - Cholesky factorization (`LL^T`) and triangular solves
 //! - Eigendecomposition of symmetric matrices (for NT scaling and step sizes)
-//! - Matrix square root and inverse square root (for Nesterov-Todd scaling)
-//! - Log-determinant (via Cholesky diagonal)
-//! - Standard operations: multiply, add, scale, trace, inner product
+//! - Matrix square root and regularized inverse (for Nesterov-Todd scaling)
+//! - The smallest eigenvalue alone (for step sizes and certified bounds)
+//! - Standard operations: multiply, subtract, scale, inner product
 //!
 //! All operations are tuned for cache efficiency on column-major layout.
 //! Matrix multiply uses a blocked (tiled) algorithm to keep working sets in L1.
@@ -279,31 +279,6 @@ impl DenseMatrix {
         Ok(c)
     }
 
-    /// Computes the matrix sum `self + other`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`GwError::DimensionMismatch`] if dimensions differ.
-    pub fn add(&self, other: &Self) -> Result<Self, GwError> {
-        if self.rows != other.rows || self.cols != other.cols {
-            return Err(GwError::DimensionMismatch {
-                expected: self.rows * self.cols,
-                got: other.rows * other.cols,
-            });
-        }
-        let data: Vec<f64> = self
-            .data
-            .iter()
-            .zip(&other.data)
-            .map(|(&a, &b)| a + b)
-            .collect();
-        Ok(Self {
-            data,
-            rows: self.rows,
-            cols: self.cols,
-        })
-    }
-
     /// Computes the matrix difference `self - other`.
     ///
     /// # Errors
@@ -381,18 +356,6 @@ impl DenseMatrix {
         for x in &mut self.data {
             *x *= scalar;
         }
-    }
-
-    /// Returns the trace (sum of diagonal elements).
-    ///
-    /// Only meaningful for square matrices. Uses strided access along the diagonal.
-    pub fn trace(&self) -> f64 {
-        let n = self.rows.min(self.cols);
-        let mut s = 0.0_f64;
-        for i in 0..n {
-            s += self.data[idx(i, i, self.rows)];
-        }
-        s
     }
 
     /// Computes the Frobenius inner product `⟨self, other⟩ = tr(self^T · other)`.
@@ -511,68 +474,6 @@ impl DenseMatrix {
         }
 
         Ok(x)
-    }
-
-    /// Solves `L X = B` where `L` is lower-triangular and `B` is a matrix.
-    ///
-    /// Each column of `B` is solved independently via forward substitution.
-    /// The result overwrites `B` in-place for zero-allocation hot paths.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`GwError::DimensionMismatch`] if dimensions are incompatible.
-    pub fn forward_solve_matrix(l: &Self, b: &mut Self) -> Result<(), GwError> {
-        let n = l.rows;
-        if n != l.cols || n != b.rows {
-            return Err(GwError::DimensionMismatch {
-                expected: n,
-                got: b.rows,
-            });
-        }
-        let ld = &l.data;
-        let ncols = b.cols;
-
-        for c in 0..ncols {
-            let b_col = col_mut(&mut b.data, c, n);
-            for j in 0..n {
-                b_col[j] /= ld[idx(j, j, n)];
-                let val = b_col[j];
-                for i in (j + 1)..n {
-                    b_col[i] = ld[idx(i, j, n)].mul_add(-val, b_col[i]);
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Solves `L^T X = B` where `L` is lower-triangular (so `L^T` is upper).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`GwError::DimensionMismatch`] if dimensions are incompatible.
-    pub fn back_solve_matrix(l: &Self, b: &mut Self) -> Result<(), GwError> {
-        let n = l.rows;
-        if n != l.cols || n != b.rows {
-            return Err(GwError::DimensionMismatch {
-                expected: n,
-                got: b.rows,
-            });
-        }
-        let ld = &l.data;
-        let ncols = b.cols;
-
-        for c in 0..ncols {
-            let b_col = col_mut(&mut b.data, c, n);
-            for j in (0..n).rev() {
-                for i in (j + 1)..n {
-                    b_col[j] = ld[idx(i, j, n)].mul_add(-b_col[i], b_col[j]);
-                }
-                b_col[j] /= ld[idx(j, j, n)];
-            }
-        }
-
-        Ok(())
     }
 
     /// Computes the eigendecomposition `self = Q Λ Q^T` of a symmetric matrix.
@@ -742,30 +643,6 @@ impl DenseMatrix {
         Ok(vals)
     }
 
-    /// Returns `true` if this symmetric matrix is positive definite.
-    ///
-    /// Checks by attempting Cholesky factorization.
-    pub fn is_positive_definite(&self) -> bool {
-        self.cholesky().is_ok()
-    }
-
-    /// Computes `ln det(self)` via Cholesky: `2 Σ ln(L_ii)`.
-    ///
-    /// Used in the log-det barrier function (see [`MATH.md`](./MATH.md) §3.1).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`GwError::NotPositiveDefinite`] if the matrix is not PD.
-    pub fn log_det(&self) -> Result<f64, GwError> {
-        let l = self.cholesky()?;
-        let n = l.rows;
-        let mut sum = 0.0_f64;
-        for i in 0..n {
-            sum += l.data[idx(i, i, n)].ln();
-        }
-        Ok(2.0 * sum)
-    }
-
     /// Computes the minimum eigenvalue of a symmetric matrix.
     ///
     /// Reduces the matrix to tridiagonal form and bisects on its inertia,
@@ -813,7 +690,7 @@ impl DenseMatrix {
 
     /// Applies a scalar function `f` to the eigenvalues: `Q diag(f(λ_i)) Q^T`.
     ///
-    /// This is the core primitive for `sqrt_spd`, `inv_sqrt_spd`, etc.
+    /// This is the core primitive for `sqrt_spd` and `inverse_regularized`.
     ///
     /// # Errors
     ///
@@ -852,41 +729,6 @@ impl DenseMatrix {
             }
             Ok(lam.max(0.0).sqrt())
         })
-    }
-
-    /// Computes the symmetric positive definite inverse square root `self^{-1/2}`.
-    ///
-    /// Via eigendecomposition: if `self = Q Λ Q^T`, then `self^{-1/2} = Q Λ^{-1/2} Q^T`.
-    ///
-    /// Used in step size computation (see [`MATH.md`](./MATH.md) §3.5).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`GwError::NotPositiveDefinite`] if any eigenvalue is non-positive.
-    pub fn inv_sqrt_spd(&self) -> Result<Self, GwError> {
-        self.apply_eigen_fn(|lam| {
-            if lam <= 1e-15 {
-                return Err(GwError::NotPositiveDefinite);
-            }
-            Ok(1.0 / lam.sqrt())
-        })
-    }
-
-    /// Computes the inverse of a symmetric positive definite matrix via Cholesky.
-    ///
-    /// Solves `L L^T X = I` column-by-column using forward/back substitution.
-    /// More numerically stable than eigendecomposition-based inversion.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`GwError::NotPositiveDefinite`] if the matrix is not PD.
-    pub fn inverse_spd(&self) -> Result<Self, GwError> {
-        let l = self.cholesky()?;
-        let n = l.rows;
-        let mut inv = Self::identity(n);
-        Self::forward_solve_matrix(&l, &mut inv)?;
-        Self::back_solve_matrix(&l, &mut inv)?;
-        Ok(inv)
     }
 
     /// Computes the inverse of a symmetric PSD matrix via eigendecomposition
@@ -1080,15 +922,6 @@ mod tests {
     }
 
     #[test]
-    fn identity_properties() {
-        let id = DenseMatrix::identity(4);
-        assert!(approx_eq(id.trace(), 4.0, 1e-15));
-        assert!(id.is_positive_definite());
-        let det = id.log_det().unwrap_or_else(|_| panic!("log_det failed"));
-        assert!(approx_eq(det, 0.0, 1e-15));
-    }
-
-    #[test]
     fn transpose_roundtrip() {
         let m = DenseMatrix::from_vec(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
             .unwrap_or_else(|_| panic!("from_vec failed"));
@@ -1230,25 +1063,6 @@ mod tests {
     }
 
     #[test]
-    fn inverse_spd_identity() {
-        let a = DenseMatrix::from_vec(2, 2, vec![4.0, 2.0, 2.0, 3.0])
-            .unwrap_or_else(|_| panic!("from_vec failed"));
-        let inv = a.inverse_spd().unwrap_or_else(|_| panic!("inverse failed"));
-        let prod = a.mul(&inv).unwrap_or_else(|_| panic!("mul failed"));
-        let id = DenseMatrix::identity(2);
-        assert!(mat_approx_eq(&prod, &id, 1e-10));
-    }
-
-    #[test]
-    fn log_det_known() {
-        // det([[4,2],[2,3]]) = 12 - 4 = 8
-        let a = DenseMatrix::from_vec(2, 2, vec![4.0, 2.0, 2.0, 3.0])
-            .unwrap_or_else(|_| panic!("from_vec failed"));
-        let ld = a.log_det().unwrap_or_else(|_| panic!("log_det failed"));
-        assert!(approx_eq(ld, (8.0_f64).ln(), 1e-12));
-    }
-
-    #[test]
     fn mul_transpose_equals_mul_explicit() {
         let a = DenseMatrix::from_vec(2, 3, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0])
             .unwrap_or_else(|_| panic!("from_vec failed"));
@@ -1261,20 +1075,6 @@ mod tests {
             .mul_transpose(&b)
             .unwrap_or_else(|_| panic!("mul_transpose failed"));
         assert!(mat_approx_eq(&via_transpose, &direct, 1e-12));
-    }
-
-    #[test]
-    fn inv_sqrt_roundtrip() {
-        let a = DenseMatrix::from_vec(2, 2, vec![4.0, 2.0, 2.0, 3.0])
-            .unwrap_or_else(|_| panic!("from_vec failed"));
-        let inv_sq = a
-            .inv_sqrt_spd()
-            .unwrap_or_else(|_| panic!("inv_sqrt failed"));
-        // inv_sq * A * inv_sq = I
-        let tmp = inv_sq.mul(&a).unwrap_or_else(|_| panic!("mul failed"));
-        let result = tmp.mul(&inv_sq).unwrap_or_else(|_| panic!("mul failed"));
-        let id = DenseMatrix::identity(2);
-        assert!(mat_approx_eq(&result, &id, 1e-10));
     }
 
     #[test]
@@ -1297,14 +1097,15 @@ mod tests {
     }
 
     #[test]
-    fn add_sub_roundtrip() {
-        let a = DenseMatrix::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0])
+    fn sub_subtracts_elementwise() {
+        let a = DenseMatrix::from_vec(2, 2, vec![6.0, 8.0, 10.0, 12.0])
             .unwrap_or_else(|_| panic!("from_vec failed"));
         let b = DenseMatrix::from_vec(2, 2, vec![5.0, 6.0, 7.0, 8.0])
             .unwrap_or_else(|_| panic!("from_vec failed"));
-        let sum = a.add(&b).unwrap_or_else(|_| panic!("add failed"));
-        let diff = sum.sub(&b).unwrap_or_else(|_| panic!("sub failed"));
-        assert!(mat_approx_eq(&a, &diff, 1e-15));
+        let expected = DenseMatrix::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0])
+            .unwrap_or_else(|_| panic!("from_vec failed"));
+        let diff = a.sub(&b).unwrap_or_else(|_| panic!("sub failed"));
+        assert!(mat_approx_eq(&diff, &expected, 1e-15));
     }
 
     #[test]

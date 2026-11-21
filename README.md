@@ -9,7 +9,7 @@ I learned the theory behind this project in **CMPUT 498: Advanced Algorithms** a
 This project implements the entire pipeline from scratch — no CVXPY, no MOSEK, no BLAS, no external optimization or linear algebra libraries. Every component is hand-written:
 
 - **Dense linear algebra**: Cholesky factorization, eigendecomposition, matrix square roots
-- **Primal-dual interior point method**: Nesterov-Todd scaling, Schur complement system, log-det barrier
+- **Primal-dual interior point method**: Nesterov-Todd scaling, Schur complement system, central-path step control
 - **Burer-Monteiro low-rank solver**: nonlinear CG on the factored form $X = RR^T$, scalable to 20,000 nodes
 - **GW rounding pipeline**: random hyperplane rounding or Zwick's outward rotations, one-flip local search, iterated local search with variable perturbation, parallel population-based refinement
 
