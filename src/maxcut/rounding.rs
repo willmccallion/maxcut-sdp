@@ -75,6 +75,10 @@ pub struct TrialPlan {
     pub rounding: Rounding,
 }
 
+/// The `ε` of `X + εI`, which lets Cholesky factor an `X` that is only
+/// positive semidefinite.
+const CHOLESKY_REGULARIZATION: f64 = 1e-10;
+
 /// Extracts unit vectors from a PSD matrix via Cholesky factorization.
 ///
 /// Given PSD matrix `X`, computes `L` such that `X = L L^T`, then returns
@@ -88,19 +92,13 @@ pub struct TrialPlan {
 ///
 /// Returns an error if even the regularized matrix fails Cholesky.
 pub fn extract_vectors(x: &DenseMatrix) -> Result<DenseMatrix, GwError> {
-    let n = x.rows();
-
     // Try Cholesky directly first.
     if let Ok(l) = x.cholesky() {
         return Ok(l.transpose());
     }
 
-    // Regularize: X + ε I.
-    let eps = 1e-10;
     let mut x_reg = x.clone();
-    for i in 0..n {
-        x_reg.set(i, i, x_reg.get(i, i) + eps);
-    }
+    x_reg.add_to_diagonal(CHOLESKY_REGULARIZATION);
     let l = x_reg.cholesky()?;
     Ok(l.transpose())
 }

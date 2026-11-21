@@ -251,6 +251,20 @@ impl DenseMatrix {
         Ok(c)
     }
 
+    /// Adds `shift` to every diagonal entry.
+    pub(crate) fn add_to_diagonal(&mut self, shift: f64) {
+        for i in 0..self.rows.min(self.cols) {
+            self.data[idx(i, i, self.rows)] += shift;
+        }
+    }
+
+    /// Subtracts `values[i]` from each diagonal entry `(i, i)`.
+    pub(crate) fn sub_diagonal(&mut self, values: &[f64]) {
+        for (i, &value) in values.iter().enumerate() {
+            self.data[idx(i, i, self.rows)] -= value;
+        }
+    }
+
     /// The congruence `self · middle · self`, multiplied left to right.
     ///
     /// # Errors
