@@ -422,32 +422,25 @@ impl<'a> ScaledConstraint<'a> {
     }
 }
 
-/// Computes the maximum `α > 0` such that `A + α ΔA ≻ 0`.
-///
-/// If all eigenvalues of `A^{-1/2} ΔA A^{-1/2}` are ≥ 0, then `α` can be
-/// arbitrarily large (returns a large sentinel). Otherwise `α_max = -1/λ_min`
-/// where `λ_min < 0` is the most negative eigenvalue.
-///
-/// Uses eigendecomposition of A (with clamping) so it works even when A
-/// is only PSD rather than strictly PD.
+/// The largest `α` with `A + α ΔA ≻ 0`: `−1/λ_min` for the smallest
+/// eigenvalue of `A^{-1/2} ΔA A^{-1/2}`, or infinity when that is not
+/// negative. `A`'s eigenvalues are floored, so a merely semidefinite `A`
+/// still gives a step.
 fn max_feasible_step(a: &DenseMatrix, da: &DenseMatrix) -> Result<f64, GwError> {
-    // A^{-1/2} via eigendecomposition with clamped eigenvalues.
     let a_inv_half = a
         .inv_sqrt_clamped(EIGENVALUE_FLOOR)
         .map_err(at("step A^-1/2"))?;
-
     let mut scaled = a_inv_half
         .congruence(da)
         .map_err(at("step A^-1/2 dA A^-1/2"))?;
     scaled.symmetrize();
 
     let min_eig = scaled.min_eigenvalue().map_err(at("step eigenvalue"))?;
-
-    if min_eig >= 0.0 {
-        Ok(1e10) // DA is PSD relative to A, step is essentially unbounded.
+    Ok(if min_eig >= 0.0 {
+        f64::INFINITY
     } else {
-        Ok(-1.0 / min_eig)
-    }
+        -1.0 / min_eig
+    })
 }
 
 /// Wraps an error that the IPM step `stage` ran into.
