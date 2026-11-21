@@ -429,12 +429,11 @@ fn compute_riemannian_gradient(
     let vdata = v.data();
     let gdata = riem_grad.data_mut();
 
-    // 1. Zero buffer.
     for x in gdata.iter_mut() {
         *x = 0.0;
     }
 
-    // 2. Edge-iteration gradient accumulation (sequential — edges share vertices).
+    // Sequential: edges share vertices.
     for &ColumnEdge {
         i_offset: ci,
         j_offset: cj,
@@ -457,7 +456,7 @@ fn compute_riemannian_gradient(
         }
     }
 
-    // 3. Per-column tangent projection + norm² (parallel — columns are independent).
+    // Parallel: the columns are independent.
     let partial_sums: Vec<f64> = gdata
         .par_chunks_mut(r * SUM_CHUNK)
         .zip(vdata.par_chunks(r * SUM_CHUNK))
@@ -498,7 +497,6 @@ fn compute_pr_beta(
     n: usize,
     iter: usize,
 ) -> f64 {
-    // Periodic restart.
     if iter.is_multiple_of(n) {
         return 0.0;
     }
@@ -517,9 +515,6 @@ fn compute_pr_beta(
     let new_norm_sq = dot(gn, gn);
     let gn_go = dot(gn, go);
 
-    // PR+ formula: β = max(0, (‖gn‖² − ⟨gn, go⟩) / ‖go‖²)
-    // The max(0, ...) clamp (PR+) provides automatic restarts when CG
-    // direction quality degrades, without needing an explicit Powell check.
     ((new_norm_sq - gn_go) / prev_grad_norm_sq).max(0.0)
 }
 
@@ -562,7 +557,6 @@ fn random_unit_vectors(n: usize, r: usize, rng: &mut impl Rng) -> DenseMatrix {
         }
     }
 
-    // Normalize each column to unit length.
     for c in data.chunks_mut(r) {
         let norm_sq = dot(c, c);
         let inv_norm = 1.0 / norm_sq.sqrt();
