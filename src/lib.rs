@@ -40,6 +40,14 @@ pub enum GwError {
     /// The SDP solver failed to converge or encountered a numerical issue.
     SolverFailed(String),
 
+    /// A step of the interior point method failed on the error `cause`.
+    SolverStep {
+        /// The step that failed.
+        stage: &'static str,
+        /// What went wrong in it.
+        cause: Box<Self>,
+    },
+
     /// Failed to parse an input file.
     ParseError(String),
 
@@ -70,6 +78,7 @@ impl fmt::Display for GwError {
             Self::InvalidGraph(msg) => write!(f, "invalid graph: {msg}"),
             Self::InvalidMatrix(msg) => write!(f, "invalid matrix: {msg}"),
             Self::SolverFailed(msg) => write!(f, "solver failed: {msg}"),
+            Self::SolverStep { stage, cause } => write!(f, "solver failed at {stage}: {cause}"),
             Self::ParseError(msg) => write!(f, "parse error: {msg}"),
             Self::NotPositiveDefinite => write!(f, "matrix is not positive definite"),
             Self::DimensionMismatch { expected, got } => {
@@ -86,4 +95,34 @@ impl fmt::Display for GwError {
     }
 }
 
-impl std::error::Error for GwError {}
+impl std::error::Error for GwError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::SolverStep { cause, .. } => Some(cause.as_ref()),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error as _;
+
+    #[test]
+    fn a_failed_solver_step_names_the_step_and_keeps_its_cause() {
+        let error = GwError::SolverStep {
+            stage: "Schur Cholesky",
+            cause: Box::new(GwError::NotPositiveDefinite),
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "solver failed at Schur Cholesky: matrix is not positive definite"
+        );
+        assert!(matches!(
+            error.source().and_then(|cause| cause.downcast_ref()),
+            Some(GwError::NotPositiveDefinite)
+        ));
+    }
+}
