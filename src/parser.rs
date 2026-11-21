@@ -14,6 +14,10 @@ use std::fmt;
 use crate::GwError;
 use crate::graph::Graph;
 
+/// Problem-line formats a DIMACS graph may declare: `edge`, and `col` from
+/// the graph-colouring instances.
+const DIMACS_FORMATS: [&str; 2] = ["edge", "col"];
+
 /// Parses a graph in Biq Mac Library format.
 ///
 /// Format:
@@ -56,7 +60,8 @@ pub fn parse_biqmac(input: &str) -> Result<Graph, GwError> {
 /// ```
 ///
 /// Vertex indices are 1-based. Edge weights default to 1 if omitted. The
-/// problem line must come before any edge.
+/// problem line's format is `edge` or `col`, and it must come once, before
+/// any edge.
 ///
 /// # Errors
 ///
@@ -67,6 +72,9 @@ pub fn parse_dimacs(input: &str) -> Result<Graph, GwError> {
         let mut tokens = line.split_whitespace();
         match tokens.next() {
             Some("p") => {
+                if graph.is_some() {
+                    return Err(LineError::SecondProblemLine.at(number));
+                }
                 graph = Some(parse_problem_line(tokens).map_err(|e| e.at(number))?);
             }
             Some("e") => {
@@ -119,7 +127,10 @@ fn parse_counts<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Result<usize, 
 /// The empty graph a DIMACS problem line `p FORMAT n m` declares, given the
 /// tokens after `p`.
 fn parse_problem_line<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Result<Graph, LineError> {
-    let _ = tokens.next().ok_or(LineError::Missing("format"))?;
+    let format = tokens.next().ok_or(LineError::Missing("format"))?;
+    if !DIMACS_FORMATS.contains(&format) {
+        return Err(LineError::UnknownFormat(format.to_string()));
+    }
     Ok(Graph::new(parse_counts(tokens)?))
 }
 
@@ -174,6 +185,8 @@ enum LineError {
     Missing(&'static str),
     NotANumber { field: &'static str, token: String },
     VertexOutOfRange { vertex: usize, n: usize },
+    UnknownFormat(String),
+    SecondProblemLine,
     EdgeBeforeProblemLine,
     Graph(GwError),
 }
@@ -193,6 +206,11 @@ impl fmt::Display for LineError {
             Self::VertexOutOfRange { vertex, n } => {
                 write!(f, "vertex {vertex} is outside 1..={n}")
             }
+            Self::UnknownFormat(format) => write!(
+                f,
+                "problem line format `{format}` is not one of {DIMACS_FORMATS:?}"
+            ),
+            Self::SecondProblemLine => write!(f, "a second problem line"),
             Self::EdgeBeforeProblemLine => write!(f, "edge before the problem line"),
             Self::Graph(error) => write!(f, "{error}"),
         }
