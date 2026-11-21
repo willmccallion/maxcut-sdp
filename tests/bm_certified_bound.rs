@@ -45,7 +45,7 @@ fn quick_bm_config(max_iterations: usize) -> GwBmConfig {
 fn an_unconverged_bm_still_reports_a_bound_at_least_the_sdp_value() {
     let graph = random_graph_with_edges(60, 240, 9);
 
-    let bm = gw_maxcut_bm(&graph, &quick_bm_config(2));
+    let bm = gw_maxcut_bm(&graph, &quick_bm_config(2), |_| {});
 
     let bm = bm.unwrap_or_else(|e| panic!("bm failed: {e}"));
     let sdp = sdp_value(&graph);
@@ -60,7 +60,7 @@ fn an_unconverged_bm_still_reports_a_bound_at_least_the_sdp_value() {
 fn a_converged_bm_certifies_a_bound_close_to_the_sdp_value() {
     let graph = random_graph_with_edges(60, 240, 9);
 
-    let bm = gw_maxcut_bm(&graph, &quick_bm_config(10_000));
+    let bm = gw_maxcut_bm(&graph, &quick_bm_config(10_000), |_| {});
 
     let bm = bm.unwrap_or_else(|e| panic!("bm failed: {e}"));
     let sdp = sdp_value(&graph);
@@ -78,7 +78,7 @@ fn past_the_certified_size_bm_reports_its_relaxation_value_and_no_ratio() {
     let n = MAX_CERTIFIED_VERTICES + 1;
     let graph = random_graph_with_edges(n, 2 * n, 9);
 
-    let bm = gw_maxcut_bm(&graph, &quick_bm_config(10));
+    let bm = gw_maxcut_bm(&graph, &quick_bm_config(10), |_| {});
 
     let bm = bm.unwrap_or_else(|e| panic!("bm failed: {e}"));
     assert!(

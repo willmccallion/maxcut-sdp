@@ -69,7 +69,7 @@ fn seeded_bm_runs() -> &'static [(Vec<bool>, f64, SdpBound)] {
         };
         (0..RUNS)
             .map(|_| {
-                let r = gw_maxcut_bm(&graph, &config)
+                let r = gw_maxcut_bm(&graph, &config, |_| {})
                     .unwrap_or_else(|e| panic!("gw_maxcut_bm failed: {e}"));
                 (r.partition, r.cut_value, r.sdp_bound)
             })

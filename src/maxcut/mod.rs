@@ -14,22 +14,23 @@
 //!
 //! See [`MATH.md`](./MATH.md) for the full mathematical derivation.
 
+mod bm_pipeline;
 pub mod exact;
 pub mod rounding;
 
 use std::num::NonZeroUsize;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::GwError;
 use crate::graph::Graph;
+use crate::maxcut::bm_pipeline::{BmPipeline, Budget};
 use crate::maxcut::rounding::{Rounding, TrialPlan};
-use crate::sdp::bm::{BmProgress, BmSolver, BmSolverConfig};
+use crate::sdp::bm::{BmProgress, BmSolverConfig};
 use crate::sdp::ipm::{IpmConfig, IpmSolver};
 use crate::sdp::linalg::{DenseMatrix, col, dot};
 use crate::sdp::{SdpProblem, maxcut_cost};
+use rand::SeedableRng;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-use rayon::prelude::*;
 
 /// A partition of the vertices and the weight of the edges it cuts.
 #[derive(Debug, Clone)]
@@ -144,44 +145,6 @@ fn bm_bound(graph: &Graph, relaxation: f64, vectors: &DenseMatrix) -> Result<Sdp
     )?))
 }
 
-/// Prints a BM solve's progress, with the best cut of earlier restarts.
-fn report_bm_progress(progress: BmProgress, best_cut: Option<f64>) {
-    match (progress, best_cut) {
-        (
-            BmProgress::Iteration {
-                iteration,
-                relaxation,
-                gradient_norm,
-            },
-            Some(best),
-        ) => eprintln!(
-            "  iter {iteration}: obj={relaxation:.4}, grad={gradient_norm:.2e}, best={best:.0}"
-        ),
-        (
-            BmProgress::Iteration {
-                iteration,
-                relaxation,
-                gradient_norm,
-            },
-            None,
-        ) => eprintln!("  iter {iteration}: obj={relaxation:.4}, grad={gradient_norm:.2e}"),
-        (
-            BmProgress::Finished {
-                iterations,
-                relaxation,
-                gradient_norm,
-            },
-            _,
-        ) => eprintln!("BM: iters={iterations}, obj={relaxation:.4}, grad={gradient_norm:.2e}"),
-    }
-}
-
-/// Whether a step expected to take `expected`, started at `now`, finishes by
-/// `deadline`; always when there is none.
-fn fits_before(deadline: Option<Instant>, now: Instant, expected: Duration) -> bool {
-    deadline.is_none_or(|deadline| now + expected <= deadline)
-}
-
 /// Rounding trials the configurations run by default.
 pub const DEFAULT_TRIALS: NonZeroUsize = match NonZeroUsize::new(100) {
     Some(trials) => trials,
@@ -272,40 +235,24 @@ impl Default for GwBmConfig {
 ///
 /// Returns an error if the SDP solver fails or the graph is empty.
 pub fn gw_maxcut(graph: &Graph, config: &GwConfig) -> Result<MaxCutResult, GwError> {
-    // 1. Formulate SDP.
     let problem = SdpProblem::maxcut_relaxation(graph)?;
-
-    // 2. Solve SDP.
-    let solver = IpmSolver::new(config.solver_config.clone());
-    let solution = solver.solve(&problem)?;
-
-    // The Max-Cut SDP maximizes (1/4) tr(LX) = -tr(CX). The converged dual
-    // is feasible only to within the tolerance, so its objective is certified.
+    let solution = IpmSolver::new(config.solver_config.clone()).solve(&problem)?;
+    // The converged dual is feasible only to within the tolerance, so its
+    // objective is certified rather than taken as it stands.
     let sdp_bound = SdpBound::Certified(certified_bound(problem.into_cost(), &solution.y)?);
 
-    // 3. Round with random hyperplanes.
-    let mut rng = config
-        .seed
-        .map_or_else(StdRng::from_os_rng, StdRng::seed_from_u64);
-
+    let mut rng = seeded_rng(config.seed);
     let plan = TrialPlan {
         trials: config.num_trials,
         ils_rounds: config.ils_rounds,
         rounding: config.rounding,
     };
     let best = rounding::multi_round(&solution.x, graph, plan, &mut rng)?;
-    let ratio = sdp_bound.ratio(best.cut_value, graph.total_abs_weight());
-
-    Ok(MaxCutResult {
-        partition: best.partition,
-        cut_value: best.cut_value,
-        sdp_bound,
-        approximation_ratio: ratio,
-        num_trials: config.num_trials.get(),
-    })
+    Ok(max_cut_result(graph, best, sdp_bound, plan.trials.get()))
 }
 
-/// Runs the GW Max-Cut algorithm using the Burer-Monteiro low-rank solver.
+/// Runs the GW Max-Cut algorithm using the Burer-Monteiro low-rank solver,
+/// reporting progress to `on_progress`.
 ///
 /// This is the recommended path for large or sparse graphs (n > 100).
 /// Per-iteration cost is O(|E|·r) instead of O(n³) for the dense IPM.
@@ -317,179 +264,128 @@ pub fn gw_maxcut(graph: &Graph, config: &GwConfig) -> Result<MaxCutResult, GwErr
 /// # Errors
 ///
 /// Returns an error if the graph is empty or the solver fails.
-pub fn gw_maxcut_bm(graph: &Graph, config: &GwBmConfig) -> Result<MaxCutResult, GwError> {
-    let mut rng = config
-        .seed
-        .map_or_else(StdRng::from_os_rng, StdRng::seed_from_u64);
-
-    // Run each restart independently: solve BM, then round from those vectors.
-    // Different restarts produce different vector geometries, giving the rounding
-    // more diverse starting points.
-    let solver = BmSolver::new(config.solver_config.clone());
-
-    let pool_size = 8;
-    let start = Instant::now();
-    let mut best_cut = f64::NEG_INFINITY;
-    let mut best_partition: Vec<bool> = Vec::new();
-    let mut best_relaxation: Option<(f64, DenseMatrix)> = None;
-    let mut total_trials = 0_usize;
-
-    // Collect top partitions from all restarts for the refinement pool.
-    let mut candidate_pool: Vec<Cut> = Vec::new();
-
-    let deadline = config.time_limit.map(|limit| start + limit);
-    let mut last_restart = Duration::ZERO;
-    let num_restarts = config.num_restarts.get();
-    for restart in 0..num_restarts {
-        let restart_start = Instant::now();
-        if restart > 0 && !fits_before(deadline, restart_start, last_restart) {
-            eprintln!("Time limit: stopping after {restart}/{num_restarts} restarts");
-            break;
-        }
-        let best_so_far = (best_cut > f64::NEG_INFINITY).then_some(best_cut);
-        let solution = solver.solve_maxcut(graph, &mut rng, |progress| {
-            report_bm_progress(progress, best_so_far);
-        })?;
-        let relaxation = -solution.objective;
-
-        let plan = TrialPlan {
-            trials: config.num_trials,
-            ils_rounds: config.ils_rounds,
-            rounding: config.rounding,
-        };
-        let top_partitions = rounding::best_cuts(
-            rounding::round_trials(&solution.vectors, graph, plan, &mut rng),
-            pool_size,
-        );
-        let result = top_partitions[0].clone();
-        total_trials += config.num_trials.get();
-        candidate_pool.extend(top_partitions);
-
-        if result.cut_value > best_cut {
-            best_cut = result.cut_value;
-            best_partition.clone_from(&result.partition);
-        }
-
-        eprintln!(
-            "Restart {}/{num_restarts}: relaxation={relaxation:.4}, cut={:.0}, best={best_cut:.0} ({:.1?})",
-            restart + 1,
-            result.cut_value,
-            start.elapsed()
-        );
-        if best_relaxation
-            .as_ref()
-            .is_none_or(|(best, _)| relaxation > *best)
-        {
-            best_relaxation = Some((relaxation, solution.vectors));
-        }
-        last_restart = restart_start.elapsed();
-    }
-
-    let Some((relaxation, vectors)) = best_relaxation else {
-        return Err(GwError::SolverFailed(
-            "BM solver produced no solution".into(),
-        ));
+pub fn gw_maxcut_bm(
+    graph: &Graph,
+    config: &GwBmConfig,
+    on_progress: impl FnMut(Progress),
+) -> Result<MaxCutResult, GwError> {
+    let mut rng = seeded_rng(config.seed);
+    let plan = TrialPlan {
+        trials: config.num_trials,
+        ils_rounds: config.ils_rounds,
+        rounding: config.rounding,
     };
-    let sdp_bound = bm_bound(graph, relaxation, &vectors)?;
+    let budget = Budget::start(config.time_limit);
+    let mut pipeline = BmPipeline::new(
+        graph,
+        config.solver_config.clone(),
+        plan,
+        budget,
+        on_progress,
+    );
+
+    let restarts = pipeline.run_restarts(config.num_restarts.get(), &mut rng)?;
+    let sdp_bound = bm_bound(graph, restarts.relaxation, &restarts.vectors)?;
     if let SdpBound::Certified(bound) = sdp_bound {
-        eprintln!("Certified bound: {bound:.4} ({:.1?})", start.elapsed());
+        (pipeline.on_progress)(Progress::Certified {
+            bound,
+            elapsed: pipeline.budget.elapsed(),
+        });
     }
+    let best = match pipeline.budget.deadline() {
+        Some(deadline) => pipeline.refine_until(deadline, restarts.pool, restarts.best, &mut rng),
+        None => restarts.best,
+    };
+    Ok(max_cut_result(graph, best, sdp_bound, restarts.num_trials))
+}
 
-    // Refinement phase: if a time budget is set and time remains, maintain a
-    // population of diverse partitions and refine them in parallel.
-    if let Some(deadline) = deadline {
-        // Build pool from the best partitions across all restarts.
-        candidate_pool.sort_by(|a, b| b.cut_value.total_cmp(&a.cut_value));
-        candidate_pool.truncate(pool_size);
+/// An RNG seeded with `seed`, or from the OS without one.
+fn seeded_rng(seed: Option<u64>) -> StdRng {
+    seed.map_or_else(StdRng::from_os_rng, StdRng::seed_from_u64)
+}
 
-        // Give each pool member its own RNG for parallel execution.
-        let mut pool: Vec<(Vec<bool>, f64, StdRng)> = candidate_pool
-            .into_iter()
-            .map(|cut| {
-                let seed: u64 = rng.random();
-                (cut.partition, cut.cut_value, StdRng::seed_from_u64(seed))
-            })
-            .collect();
-
-        let mut rounds_done = 0_usize;
-        let mut last_report = start.elapsed();
-        let report_interval = Duration::from_secs(10);
-        while Instant::now() < deadline {
-            // Run ILS on all pool members in parallel, each stopping at the deadline.
-            let rounds: usize = pool
-                .par_iter_mut()
-                .map(|(partition, cut, slot_rng)| {
-                    let (new_cut, rounds) = rounding::iterated_local_search_until(
-                        partition,
-                        graph,
-                        rounding::PERTURBATION_CYCLE_ROUNDS,
-                        Some(deadline),
-                        slot_rng,
-                    );
-                    *cut = new_cut;
-                    rounds
-                })
-                .sum();
-            rounds_done += rounds;
-
-            // Check for improvements across all slots.
-            for (slot, (partition, cut, _)) in pool.iter().enumerate() {
-                if *cut > best_cut {
-                    best_cut = *cut;
-                    best_partition.clone_from(partition);
-                    eprintln!(
-                        "  Refine: new best={best_cut:.0} (slot {slot}, {:.1?})",
-                        start.elapsed()
-                    );
-                }
-            }
-
-            // Periodic progress report.
-            let now = start.elapsed();
-            if now.saturating_sub(last_report) >= report_interval {
-                eprintln!("  Refine: best={best_cut:.0}, {rounds_done} rounds ({now:.1?})");
-                last_report = now;
-            }
-        }
-
-        if rounds_done > 0 {
-            eprintln!(
-                "Refinement done: {rounds_done} ILS rounds, best={best_cut:.0} ({:.1?})",
-                start.elapsed()
-            );
-        }
-    }
-
-    let ratio = sdp_bound.ratio(best_cut, graph.total_abs_weight());
-
-    Ok(MaxCutResult {
-        partition: best_partition,
-        cut_value: best_cut,
+/// The result of `num_trials` trials whose best cut is `best`.
+fn max_cut_result(
+    graph: &Graph,
+    best: Cut,
+    sdp_bound: SdpBound,
+    num_trials: usize,
+) -> MaxCutResult {
+    MaxCutResult {
+        approximation_ratio: sdp_bound.ratio(best.cut_value, graph.total_abs_weight()),
+        partition: best.partition,
+        cut_value: best.cut_value,
         sdp_bound,
-        approximation_ratio: ratio,
-        num_trials: total_trials,
-    })
+        num_trials,
+    }
+}
+
+/// Progress a GW run reports as it goes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Progress {
+    /// A BM solve's progress.
+    Bm(BmProgress),
+    /// BM restart `restart` of `restarts` (from 1) finished rounding.
+    Restart {
+        /// Which restart, from 1.
+        restart: usize,
+        /// Restarts asked for.
+        restarts: usize,
+        /// The relaxation value this restart reached.
+        relaxation: f64,
+        /// This restart's best cut.
+        cut: f64,
+        /// The best cut of all restarts so far.
+        best: f64,
+        /// Time since the run started.
+        elapsed: Duration,
+    },
+    /// The time limit left no room for another restart after `completed`.
+    TimeLimitStop {
+        /// Restarts run.
+        completed: usize,
+        /// Restarts asked for.
+        restarts: usize,
+    },
+    /// The BM bound was certified.
+    Certified {
+        /// The certified upper bound.
+        bound: f64,
+        /// Time since the run started.
+        elapsed: Duration,
+    },
+    /// Refinement found a better cut, in pool slot `slot`.
+    RefineImproved {
+        /// The new best cut.
+        best: f64,
+        /// The slot that found it.
+        slot: usize,
+        /// Time since the run started.
+        elapsed: Duration,
+    },
+    /// A periodic refinement status.
+    RefineStatus {
+        /// The best cut so far.
+        best: f64,
+        /// Iterated local search rounds run so far.
+        rounds: usize,
+        /// Time since the run started.
+        elapsed: Duration,
+    },
+    /// Refinement ended at the time limit.
+    RefineDone {
+        /// Iterated local search rounds run.
+        rounds: usize,
+        /// The best cut.
+        best: f64,
+        /// Time since the run started.
+        elapsed: Duration,
+    },
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const SECOND: Duration = Duration::from_secs(1);
-
-    #[test]
-    fn a_step_fits_when_it_ends_by_the_deadline() {
-        let now = Instant::now();
-
-        assert!(fits_before(Some(now + 2 * SECOND), now, SECOND));
-    }
-
-    #[test]
-    fn a_step_does_not_fit_when_it_would_end_after_the_deadline() {
-        let now = Instant::now();
-
-        assert!(!fits_before(Some(now + SECOND), now, 2 * SECOND));
-    }
 
     fn five_cycle() -> Graph {
         let mut g = Graph::new(5);
@@ -535,10 +431,5 @@ mod tests {
             "{bound} vs dual {}",
             -solution.dual_obj
         );
-    }
-
-    #[test]
-    fn every_step_fits_without_a_deadline() {
-        assert!(fits_before(None, Instant::now(), Duration::MAX / 2));
     }
 }
