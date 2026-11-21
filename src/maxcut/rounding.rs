@@ -18,12 +18,13 @@
 use super::Cut;
 use crate::GwError;
 use crate::graph::Graph;
+use crate::random::box_muller;
 use crate::sdp::linalg::DenseMatrix;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use std::cmp::Ordering;
-use std::f64::consts::{FRAC_PI_2, TAU};
+use std::f64::consts::FRAC_PI_2;
 use std::num::NonZeroUsize;
 use std::time::Instant;
 
@@ -147,11 +148,7 @@ pub fn outward_rotation_round(
 /// Independent standard normal samples, via the Box-Muller transform.
 fn gaussian_vector(len: usize, rng: &mut impl Rng) -> Vec<f64> {
     (0..len)
-        .map(|_| {
-            let u1: f64 = rng.random();
-            let u2: f64 = rng.random();
-            (-2.0 * u1.ln()).sqrt() * (TAU * u2).cos()
-        })
+        .map(|_| box_muller(rng.random(), rng.random()).0)
         .collect()
 }
 

@@ -23,6 +23,7 @@
 
 use crate::GwError;
 use crate::graph::Graph;
+use crate::random::box_muller;
 use crate::sdp::linalg::{DenseMatrix, dot};
 use rand::Rng;
 use rayon::prelude::*;
@@ -490,22 +491,12 @@ fn step_and_retract(v: &DenseMatrix, dir: &DenseMatrix, alpha: f64, v_trial: &mu
 fn random_unit_vectors(n: usize, r: usize, rng: &mut impl Rng) -> DenseMatrix {
     let mut v = DenseMatrix::zeros(r, n);
     let data = v.data_mut();
-    let total = r * n;
-
-    // Box-Muller: generate pairs of Gaussian samples.
-    let pairs = total / 2;
-    for p in 0..pairs {
-        let u1: f64 = rng.random();
-        let u2: f64 = rng.random();
-        let mag = (-2.0 * u1.ln()).sqrt();
-        let angle = std::f64::consts::TAU * u2;
-        data[2 * p] = mag * angle.cos();
-        data[2 * p + 1] = mag * angle.sin();
-    }
-    if total % 2 == 1 {
-        let u1: f64 = rng.random();
-        let u2: f64 = rng.random();
-        data[total - 1] = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
+    for pair in data.chunks_mut(2) {
+        let (first, second) = box_muller(rng.random(), rng.random());
+        pair[0] = first;
+        if let Some(last) = pair.get_mut(1) {
+            *last = second;
+        }
     }
 
     // Normalize each column to unit length.
