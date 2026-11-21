@@ -116,7 +116,7 @@ Outward rotations did not raise the final cut on the Biq Mac instances or on ran
 ### Supported Input Formats
 
 - **Biq Mac Library** (`.mc`): First line `n m`, then `m` lines of `i j w_ij`
-- **DIMACS**: Lines starting with `p edge n m`, then `e i j` lines
+- **DIMACS**: One problem line `p edge n m` (or `p col n m`), then `e i j [w]` lines; weights default to 1
 
 ## Project Structure
 
