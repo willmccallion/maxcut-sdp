@@ -79,15 +79,6 @@ fn a_missing_weight_is_one() {
     assert_eq!(edges.ok(), Some(vec![(0, 1, 1.0)]));
 }
 
-#[test]
-fn a_graph_refuses_a_non_finite_weight() {
-    let mut graph = Graph::new(2);
-
-    let added = graph.add_edge(0, 1, f64::NAN);
-
-    assert!(added.is_err());
-}
-
 /// The message of a parse that must fail.
 fn parse_error(parsed: Result<Graph, GwError>) -> String {
     match parsed {

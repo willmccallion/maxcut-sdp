@@ -3,6 +3,8 @@
 mod common;
 
 use common::{complete, cycle};
+use maxcut_sdp::GwError;
+use maxcut_sdp::graph::Graph;
 use maxcut_sdp::maxcut::rounding::Rounding;
 use maxcut_sdp::maxcut::{GwBmConfig, gw_maxcut_bm};
 use maxcut_sdp::sdp::solver_bm::BmSolverConfig;
@@ -61,4 +63,11 @@ fn bm_k4_gw_guarantee() {
         result.cut_value,
         alpha_gw.mul_add(4.0, -0.01)
     );
+}
+
+#[test]
+fn bm_refuses_the_empty_graph() {
+    let result = gw_maxcut_bm(&Graph::new(0), &GwBmConfig::default());
+
+    assert!(matches!(result, Err(GwError::InvalidGraph(_))));
 }
