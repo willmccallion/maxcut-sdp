@@ -9,6 +9,8 @@
 //!
 //! Use [`parse_auto`] to auto-detect the format from the input content.
 
+use std::fmt;
+
 use crate::GwError;
 use crate::graph::Graph;
 
@@ -22,52 +24,23 @@ use crate::graph::Graph;
 /// ...
 /// ```
 ///
-/// Vertex indices are 1-based and converted to 0-based internally.
+/// Vertex indices are 1-based and converted to 0-based internally. The edge
+/// count `m` must be present but is not checked against the edge lines.
 ///
 /// # Errors
 ///
-/// Returns [`GwError::ParseError`] if the input is malformed.
+/// Returns [`GwError::ParseError`], naming the line, if the input is malformed.
 pub fn parse_biqmac(input: &str) -> Result<Graph, GwError> {
-    let mut lines = input.lines().filter(|l| !l.trim().is_empty());
-
-    let header = lines
+    let mut lines = numbered_lines(input).filter(|(_, line)| !line.trim().is_empty());
+    let (header_number, header) = lines
         .next()
         .ok_or_else(|| GwError::ParseError("empty input".to_string()))?;
-    let mut parts = header.split_whitespace();
-
-    let n: usize = parts
-        .next()
-        .and_then(|s| s.parse().ok())
-        .ok_or_else(|| GwError::ParseError("missing vertex count".to_string()))?;
-    let m: usize = parts
-        .next()
-        .and_then(|s| s.parse().ok())
-        .ok_or_else(|| GwError::ParseError("missing edge count".to_string()))?;
+    let n = parse_counts(header.split_whitespace()).map_err(|e| e.at(header_number))?;
 
     let mut graph = Graph::new(n);
-
-    for (line_num, line) in lines.enumerate() {
-        let mut parts = line.split_whitespace();
-        let i: usize = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| {
-            GwError::ParseError(format!("bad vertex on edge line {}", line_num + 2))
-        })?;
-        let j: usize = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| {
-            GwError::ParseError(format!("bad vertex on edge line {}", line_num + 2))
-        })?;
-        let w = parse_weight(parts.next())
-            .map_err(|e| GwError::ParseError(format!("{e} on edge line {}", line_num + 2)))?;
-
-        // Convert 1-based to 0-based.
-        if i == 0 || j == 0 || i > n || j > n {
-            return Err(GwError::ParseError(format!(
-                "vertex index out of range on line {}: i={i}, j={j}",
-                line_num + 2
-            )));
-        }
-        graph.add_edge(i - 1, j - 1, w)?;
+    for (number, line) in lines {
+        add_edge(&mut graph, line.split_whitespace()).map_err(|e| e.at(number))?;
     }
-
-    let _ = m; // m is informational; we accept files with fewer/more edges.
     Ok(graph)
 }
 
@@ -82,73 +55,30 @@ pub fn parse_biqmac(input: &str) -> Result<Graph, GwError> {
 /// ...
 /// ```
 ///
-/// Vertex indices are 1-based. Edge weights default to 1 if omitted.
+/// Vertex indices are 1-based. Edge weights default to 1 if omitted. The
+/// problem line must come before any edge.
 ///
 /// # Errors
 ///
-/// Returns [`GwError::ParseError`] if the input is malformed.
+/// Returns [`GwError::ParseError`], naming the line, if the input is malformed.
 pub fn parse_dimacs(input: &str) -> Result<Graph, GwError> {
-    let mut n = 0_usize;
     let mut graph: Option<Graph> = None;
-
-    for line in input.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('c') {
-            continue;
-        }
-
-        if trimmed.starts_with("p ") {
-            let mut parts = trimmed.split_whitespace();
-            let _ = parts.next(); // "p"
-            let _ = parts.next(); // "edge"
-            n = parts
-                .next()
-                .and_then(|s| s.parse().ok())
-                .ok_or_else(|| GwError::ParseError("bad problem line".to_string()))?;
-            // m is informational
-            graph = Some(Graph::new(n));
-            continue;
-        }
-
-        if trimmed.starts_with("e ") {
-            let g = graph
-                .as_mut()
-                .ok_or_else(|| GwError::ParseError("edge before problem line".to_string()))?;
-            let mut parts = trimmed.split_whitespace();
-            let _ = parts.next(); // "e"
-            let i: usize = parts
-                .next()
-                .and_then(|s| s.parse().ok())
-                .ok_or_else(|| GwError::ParseError("bad edge line".to_string()))?;
-            let j: usize = parts
-                .next()
-                .and_then(|s| s.parse().ok())
-                .ok_or_else(|| GwError::ParseError("bad edge line".to_string()))?;
-            let w = parse_weight(parts.next()).map_err(GwError::ParseError)?;
-
-            if i == 0 || j == 0 || i > n || j > n {
-                return Err(GwError::ParseError(format!(
-                    "vertex index out of range: i={i}, j={j}"
-                )));
+    for (number, line) in numbered_lines(input) {
+        let mut tokens = line.split_whitespace();
+        match tokens.next() {
+            Some("p") => {
+                graph = Some(parse_problem_line(tokens).map_err(|e| e.at(number))?);
             }
-            g.add_edge(i - 1, j - 1, w)?;
+            Some("e") => {
+                let graph = graph
+                    .as_mut()
+                    .ok_or_else(|| LineError::EdgeBeforeProblemLine.at(number))?;
+                add_edge(graph, tokens).map_err(|e| e.at(number))?;
+            }
+            _ => {}
         }
     }
-
     graph.ok_or_else(|| GwError::ParseError("no problem line found".to_string()))
-}
-
-/// An edge's weight: 1 when the line gives none, otherwise the finite
-/// number it gives.
-fn parse_weight(token: Option<&str>) -> Result<f64, String> {
-    let Some(token) = token else {
-        return Ok(1.0);
-    };
-    token
-        .parse::<f64>()
-        .ok()
-        .filter(|w| w.is_finite())
-        .ok_or_else(|| format!("bad weight `{token}`"))
 }
 
 /// Auto-detects the input format and parses accordingly.
@@ -168,5 +98,103 @@ pub fn parse_auto(input: &str) -> Result<Graph, GwError> {
         parse_dimacs(input)
     } else {
         parse_biqmac(input)
+    }
+}
+
+/// The input's lines with their 1-based numbers in the file.
+fn numbered_lines(input: &str) -> impl Iterator<Item = (usize, &str)> {
+    input
+        .lines()
+        .enumerate()
+        .map(|(index, line)| (index + 1, line))
+}
+
+/// A Biq Mac header `n m`: the vertex count `n`, once `m` parses too.
+fn parse_counts<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Result<usize, LineError> {
+    let vertices = parse_count(tokens.next(), "vertex count")?;
+    let _ = parse_count(tokens.next(), "edge count")?;
+    Ok(vertices)
+}
+
+/// The empty graph a DIMACS problem line `p FORMAT n m` declares, given the
+/// tokens after `p`.
+fn parse_problem_line<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Result<Graph, LineError> {
+    let _ = tokens.next().ok_or(LineError::Missing("format"))?;
+    Ok(Graph::new(parse_counts(tokens)?))
+}
+
+/// Adds the edge `i j [w]` that `tokens` give, with 1-based vertices.
+fn add_edge<'a>(
+    graph: &mut Graph,
+    mut tokens: impl Iterator<Item = &'a str>,
+) -> Result<(), LineError> {
+    let n = graph.num_vertices();
+    let u = parse_vertex(tokens.next(), n)?;
+    let v = parse_vertex(tokens.next(), n)?;
+    let weight = parse_weight(tokens.next())?;
+    graph.add_edge(u, v, weight).map_err(LineError::Graph)
+}
+
+/// A count field, required to be a non-negative integer.
+fn parse_count(token: Option<&str>, field: &'static str) -> Result<usize, LineError> {
+    let token = token.ok_or(LineError::Missing(field))?;
+    token.parse().map_err(|_| LineError::NotANumber {
+        field,
+        token: token.to_string(),
+    })
+}
+
+/// The 0-based index of the 1-based vertex `token` names in an `n`-vertex graph.
+fn parse_vertex(token: Option<&str>, n: usize) -> Result<usize, LineError> {
+    let vertex = parse_count(token, "vertex")?;
+    if vertex == 0 || vertex > n {
+        return Err(LineError::VertexOutOfRange { vertex, n });
+    }
+    Ok(vertex - 1)
+}
+
+/// An edge's weight: 1 when the line gives none, otherwise the finite
+/// number it gives.
+fn parse_weight(token: Option<&str>) -> Result<f64, LineError> {
+    let Some(token) = token else {
+        return Ok(1.0);
+    };
+    token
+        .parse::<f64>()
+        .ok()
+        .filter(|w| w.is_finite())
+        .ok_or_else(|| LineError::NotANumber {
+            field: "weight",
+            token: token.to_string(),
+        })
+}
+
+/// What is wrong with one line of an input file.
+enum LineError {
+    Missing(&'static str),
+    NotANumber { field: &'static str, token: String },
+    VertexOutOfRange { vertex: usize, n: usize },
+    EdgeBeforeProblemLine,
+    Graph(GwError),
+}
+
+impl LineError {
+    /// This error as found on line `number` of the file.
+    fn at(self, number: usize) -> GwError {
+        GwError::ParseError(format!("line {number}: {self}"))
+    }
+}
+
+impl fmt::Display for LineError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Missing(field) => write!(f, "missing {field}"),
+            Self::NotANumber { field, token } => write!(f, "bad {field} `{token}`"),
+            Self::VertexOutOfRange { vertex, n } => {
+                write!(f, "vertex {vertex} is outside 1..={n}")
+            }
+            Self::EdgeBeforeProblemLine => write!(f, "edge before the problem line"),
+            Self::Graph(error) => write!(f, "{error}"),
+        }
     }
 }
