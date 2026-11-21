@@ -604,6 +604,16 @@ impl DenseMatrix {
         })
     }
 
+    /// The inverse square root `self^{-1/2}` of a symmetric matrix, with
+    /// eigenvalues below `floor` raised to it first.
+    ///
+    /// # Errors
+    ///
+    /// As [`eigendecomposition_symmetric`](Self::eigendecomposition_symmetric).
+    pub(crate) fn inv_sqrt_clamped(&self, floor: f64) -> Result<Self, GwError> {
+        self.apply_eigen_fn(|lam| Ok(1.0 / lam.max(floor).sqrt()))
+    }
+
     /// Computes the inverse of a symmetric PSD matrix via eigendecomposition
     /// with eigenvalue clamping.
     ///

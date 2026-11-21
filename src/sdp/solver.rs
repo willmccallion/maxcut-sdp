@@ -19,6 +19,11 @@ use super::linalg::DenseMatrix;
 use super::{ConstraintMatrix, SdpProblem, SdpSolution};
 use crate::GwError;
 
+/// Eigenvalues below this are raised to it before `S⁻¹`, `P^{-1/2}` or
+/// `A^{-1/2}` is formed, so a nearly singular iterate cannot blow them up.
+/// See [`MATH.md`](./MATH.md) §6.
+const EIGENVALUE_FLOOR: f64 = 1e-14;
+
 /// Centering parameter `σ`: each step targets `μ_next = σ μ`. See [`MATH.md`](./MATH.md) §3.6.
 const CENTERING: f64 = 0.2;
 
@@ -195,10 +200,7 @@ impl Solver {
 
         // P^{-1/2} with tolerance-aware clamping of eigenvalues.
         let p_inv_half = p
-            .apply_eigen_fn(|lam| {
-                let clamped = lam.max(1e-14);
-                Ok(1.0 / clamped.sqrt())
-            })
+            .inv_sqrt_clamped(EIGENVALUE_FLOOR)
             .map_err(|e| GwError::SolverFailed(format!("NT P^-1/2: {e}")))?;
 
         // W = X^{1/2} P^{-1/2} X^{1/2}
@@ -252,7 +254,7 @@ impl Solver {
 
         // RHS: h_i = r_{p,i} - tr(A_i (σμ S^{-1} - X)) + tr(A_i W R_d W)
         let s_inv = s
-            .inverse_regularized(1e-14)
+            .inverse_regularized(EIGENVALUE_FLOOR)
             .map_err(|e| GwError::SolverFailed(format!("Schur S^-1: {e}")))?;
         let centering = s_inv
             .scale(mu)
@@ -330,7 +332,7 @@ impl Solver {
 
         // ΔX = σμ S⁻¹ − X − W ΔS W  (note the MINUS sign on W ΔS W)
         let s_inv = s
-            .inverse_regularized(1e-14)
+            .inverse_regularized(EIGENVALUE_FLOOR)
             .map_err(|e| GwError::SolverFailed(format!("dx S^-1: {e}")))?;
 
         let mut dx = s_inv.scale(mu);
@@ -494,10 +496,7 @@ impl<'a> ScaledConstraint<'a> {
 fn max_feasible_step(a: &DenseMatrix, da: &DenseMatrix) -> Result<f64, GwError> {
     // A^{-1/2} via eigendecomposition with clamped eigenvalues.
     let a_inv_half = a
-        .apply_eigen_fn(|lam| {
-            let clamped = lam.max(1e-14);
-            Ok(1.0 / clamped.sqrt())
-        })
+        .inv_sqrt_clamped(EIGENVALUE_FLOOR)
         .map_err(|e| GwError::SolverFailed(format!("step A^-1/2: {e}")))?;
 
     let mut scaled = a_inv_half
