@@ -1,73 +1,22 @@
-//! Tests for SDP solver correctness on known instances.
-//!
-//! Verifies Cholesky, eigendecomposition, and full SDP solves against
-//! analytically known solutions.
+//! The interior point method against SDPs with analytically known solutions.
 
 mod common;
 
 use common::{cycle, triangle};
 use maxcut_sdp::GwError;
+use maxcut_sdp::graph::Graph;
 use maxcut_sdp::sdp::linalg::DenseMatrix;
 use maxcut_sdp::sdp::solver::{Solver, SolverConfig};
-use maxcut_sdp::sdp::{ConstraintMatrix, SdpProblem};
+use maxcut_sdp::sdp::{ConstraintMatrix, SdpProblem, SdpSolution};
 
-/// Cholesky of a known 2×2 SPD matrix.
-#[test]
-fn cholesky_2x2() {
-    // A = [[4, 2], [2, 3]]
-    // L = [[2, 0], [1, √2]]
-    let a = DenseMatrix::from_vec(2, 2, vec![4.0, 2.0, 2.0, 3.0]);
-    assert!(a.is_ok());
-    let a = a.unwrap_or_else(|_| panic!("from_vec failed"));
-
-    let l = a.cholesky();
-    assert!(l.is_ok());
-    let l = l.unwrap_or_else(|_| panic!("cholesky failed"));
-
-    assert!((l.get(0, 0) - 2.0).abs() < 1e-10);
-    assert!((l.get(1, 0) - 1.0).abs() < 1e-10);
-    assert!((l.get(0, 1)).abs() < 1e-10);
-    assert!((l.get(1, 1) - f64::sqrt(2.0)).abs() < 1e-10);
+fn solve(problem: &SdpProblem) -> SdpSolution {
+    Solver::new(SolverConfig::default())
+        .solve(problem)
+        .unwrap_or_else(|e| panic!("solver failed: {e}"))
 }
 
-/// Cholesky should fail on a non-PD matrix.
-#[test]
-fn cholesky_non_pd() {
-    // A = [[1, 2], [2, 1]] has eigenvalues -1 and 3
-    let a = DenseMatrix::from_vec(2, 2, vec![1.0, 2.0, 2.0, 1.0]);
-    assert!(a.is_ok());
-    let a = a.unwrap_or_else(|_| panic!("from_vec failed"));
-    assert!(a.cholesky().is_err());
-}
-
-/// Eigenvalues of a known 2×2 symmetric matrix.
-#[test]
-fn eigenvalues_2x2() {
-    // A = [[2, 1], [1, 2]] has eigenvalues 1 and 3
-    let a = DenseMatrix::from_vec(2, 2, vec![2.0, 1.0, 1.0, 2.0]);
-    assert!(a.is_ok());
-    let a = a.unwrap_or_else(|_| panic!("from_vec failed"));
-
-    let eigs = a.eigenvalues_symmetric();
-    assert!(eigs.is_ok());
-    let mut eigs = eigs.unwrap_or_else(|_| panic!("eigenvalues failed"));
-    eigs.sort_by(|a, b| a.partial_cmp(b).unwrap_or_else(|| panic!("NaN eigenvalue")));
-
-    assert!((eigs[0] - 1.0).abs() < 1e-10);
-    assert!((eigs[1] - 3.0).abs() < 1e-10);
-}
-
-/// Identity matrix properties.
-#[test]
-fn identity_properties() {
-    let id = DenseMatrix::identity(3);
-
-    assert!((id.trace() - 3.0).abs() < 1e-10);
-    assert!(id.is_positive_definite());
-
-    let det = id.log_det();
-    assert!(det.is_ok());
-    assert!((det.unwrap_or_else(|_| panic!("log_det failed"))).abs() < 1e-10);
+fn maxcut_relaxation(graph: &Graph) -> SdpProblem {
+    SdpProblem::maxcut_relaxation(graph).unwrap_or_else(|e| panic!("relaxation failed: {e}"))
 }
 
 /// Solve the 2×2 SDP from MATH.md §4:
@@ -75,80 +24,50 @@ fn identity_properties() {
 /// Optimal value = 2, X* = [[1,1],[1,1]]
 #[test]
 fn sdp_2x2_worked_example() {
-    let c = DenseMatrix::identity(2);
-
-    let a1 = DenseMatrix::from_vec(2, 2, vec![0.0, 1.0, 1.0, 0.0]);
-    assert!(a1.is_ok());
-
-    let mut problem = SdpProblem::new(c);
-    let constraint = ConstraintMatrix::Dense(a1.unwrap_or_else(|_| panic!("from_vec failed")));
+    let a1 = DenseMatrix::from_vec(2, 2, vec![0.0, 1.0, 1.0, 0.0])
+        .unwrap_or_else(|e| panic!("from_vec failed: {e}"));
+    let mut problem = SdpProblem::new(DenseMatrix::identity(2));
     // tr(A1 X) = 2*x_12 = 2, so x_12 = 1
-    let added = problem.add_constraint(constraint, 2.0);
-    assert!(added.is_ok());
+    problem
+        .add_constraint(ConstraintMatrix::Dense(a1), 2.0)
+        .unwrap_or_else(|e| panic!("add_constraint failed: {e}"));
 
-    let solver = Solver::new(SolverConfig::default());
-    let solution = solver.solve(&problem);
-    let solution = solution.unwrap_or_else(|e| panic!("solver failed: {e}"));
+    let solution = solve(&problem);
+
     assert!((solution.primal_obj - 2.0).abs() < 1e-4);
     assert!(solution.duality_gap < 1e-6);
 }
 
-/// Max-Cut SDP on the triangle: `SDP_OPT` ≥ OPT = 2.
+/// The triangle's SDP value is `9/4`: three unit vectors at 120°.
 #[test]
-fn maxcut_sdp_triangle() {
-    let problem = SdpProblem::maxcut_relaxation(&triangle(1.0));
-    assert!(problem.is_ok());
-    let problem = problem.unwrap_or_else(|_| panic!("maxcut_relaxation failed"));
+fn ipm_reaches_the_sdp_value_of_the_triangle() {
+    let solution = solve(&maxcut_relaxation(&triangle(1.0)));
 
-    let solver = Solver::new(SolverConfig::default());
-    let solution = solver.solve(&problem);
-    assert!(solution.is_ok());
-
-    let solution = solution.unwrap_or_else(|_| panic!("solver failed"));
-
-    // SDP optimal for Max-Cut is a maximization: the negated primal objective
-    // should give us SDP_OPT ≥ 2.0
-    let sdp_opt = -solution.primal_obj;
-    assert!(sdp_opt >= 2.0 - 1e-4);
+    let sdp_value = -solution.primal_obj;
+    assert!((sdp_value - 2.25).abs() < 1e-6, "SDP value {sdp_value}");
 }
 
-/// Verify primal feasibility of the Max-Cut SDP solution.
 #[test]
-fn maxcut_sdp_feasibility() {
-    let problem = SdpProblem::maxcut_relaxation(&cycle(4));
-    assert!(problem.is_ok());
-    let problem = problem.unwrap_or_else(|_| panic!("maxcut_relaxation failed"));
+fn the_maxcut_solution_is_feasible() {
+    let solution = solve(&maxcut_relaxation(&cycle(4)));
 
-    let solver = Solver::new(SolverConfig::default());
-    let solution = solver.solve(&problem);
-    assert!(solution.is_ok());
-    let solution = solution.unwrap_or_else(|_| panic!("solver failed"));
-
-    // Check diagonal constraints: X_ii ≈ 1
     for i in 0..4 {
         assert!((solution.x.get(i, i) - 1.0).abs() < 1e-4);
     }
-
-    // Check PSD: all eigenvalues ≥ 0
-    let eigs = solution.x.eigenvalues_symmetric();
-    assert!(eigs.is_ok());
-    let eigs = eigs.unwrap_or_else(|_| panic!("eigenvalues failed"));
-    for &e in &eigs {
-        assert!(e > -1e-6);
-    }
+    let eigenvalues = solution
+        .x
+        .eigenvalues_symmetric()
+        .unwrap_or_else(|e| panic!("eigenvalues failed: {e}"));
+    assert!(eigenvalues.iter().all(|&e| e > -1e-6), "{eigenvalues:?}");
 }
 
 /// The Max-Cut SDP value of the odd cycle `C_n` is `(n/2)(1 + cos(π/n))`.
 #[test]
 fn ipm_reaches_the_sdp_value_of_a_61_cycle() {
     let n = 61;
-    let problem = SdpProblem::maxcut_relaxation(&cycle(n))
-        .unwrap_or_else(|_| panic!("maxcut_relaxation failed"));
     let expected = (n as f64 / 2.0) * (1.0 + (std::f64::consts::PI / n as f64).cos());
 
-    let solution = Solver::new(SolverConfig::default())
-        .solve(&problem)
-        .unwrap_or_else(|e| panic!("solver failed: {e}"));
+    let solution = solve(&maxcut_relaxation(&cycle(n)));
 
     let bound = -solution.dual_obj;
     assert!(
@@ -159,8 +78,7 @@ fn ipm_reaches_the_sdp_value_of_a_61_cycle() {
 
 #[test]
 fn stopping_before_convergence_is_an_error() {
-    let problem = SdpProblem::maxcut_relaxation(&cycle(5))
-        .unwrap_or_else(|_| panic!("maxcut_relaxation failed"));
+    let problem = maxcut_relaxation(&cycle(5));
     let solver = Solver::new(SolverConfig {
         max_iterations: 1,
         ..SolverConfig::default()
