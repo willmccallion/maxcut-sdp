@@ -23,7 +23,6 @@ use crate::sdp::linalg::DenseMatrix;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
-use std::cmp::Ordering;
 use std::f64::consts::FRAC_PI_2;
 use std::num::NonZeroUsize;
 use std::time::Instant;
@@ -270,70 +269,26 @@ pub fn iterated_local_search_until(
     (best_cut, rounds_run)
 }
 
-/// Runs multiple rounding trials from pre-extracted vectors.
+/// The cuts of every rounding trial, in trial order: never empty, as
+/// `plan.trials` is not zero.
 ///
-/// This is the core rounding loop used by both the IPM and BM paths.
-/// The `vectors` matrix has dimension d × n where column i is vertex i's
-/// unit vector (d = n for IPM/Cholesky, d = r for Burer-Monteiro).
+/// The `vectors` matrix is `d × n`, column `i` the unit vector of vertex
+/// `i` (`d = n` from the IPM's Cholesky factor, `d = r` from BM). Each
+/// trial rounds them as `plan.rounding` says and improves the partition by
+/// iterated local search. Its seed is drawn from `rng` up front, so trials
+/// run in parallel yet a seeded run is reproducible.
 ///
-/// Each trial rounds the vectors as `plan.rounding` says, then runs iterated
-/// local search, which alternates one-flip local search with random
-/// perturbations.
-///
-/// With `k = 100` trials, the probability of missing a near-optimal cut is
-/// negligibly small. See [`MATH.md`](../MATH.md) §7.
-pub fn multi_round_from_vectors(
+/// See [`MATH.md`](../MATH.md) §7.
+pub fn round_trials(
     vectors: &DenseMatrix,
     graph: &Graph,
     plan: TrialPlan,
     rng: &mut impl Rng,
-) -> Cut {
-    // Generate deterministic per-trial seeds from the base RNG, then
-    // run trials in parallel with independent thread-local RNGs.
+) -> Vec<Cut> {
     let seeds: Vec<u64> = (0..plan.trials.get())
         .map(|_| rng.random::<u64>())
         .collect();
-
-    // Trials are indexed so that equal cuts go to the earliest, whatever
-    // order rayon combines them in.
-    let (_, best_partition, best_cut) = seeds
-        .par_iter()
-        .enumerate()
-        .map(|(trial, &seed)| {
-            let mut trial_rng = StdRng::seed_from_u64(seed);
-            let mut partition = plan.rounding.partition(vectors, &mut trial_rng);
-            let cut = iterated_local_search(&mut partition, graph, plan.ils_rounds, &mut trial_rng);
-            (trial, partition, cut)
-        })
-        .reduce(
-            || (usize::MAX, Vec::new(), f64::NEG_INFINITY),
-            |a, b| match b.2.total_cmp(&a.2) {
-                Ordering::Greater => b,
-                Ordering::Equal if b.0 < a.0 => b,
-                _ => a,
-            },
-        );
-
-    Cut {
-        partition: best_partition,
-        cut_value: best_cut,
-    }
-}
-
-/// Like `multi_round_from_vectors`, but also returns the best `pool_size`
-/// cuts, best first, as diverse starting points for refinement.
-pub fn multi_round_with_pool(
-    vectors: &DenseMatrix,
-    graph: &Graph,
-    plan: TrialPlan,
-    pool_size: usize,
-    rng: &mut impl Rng,
-) -> (Cut, Vec<Cut>) {
-    let seeds: Vec<u64> = (0..plan.trials.get())
-        .map(|_| rng.random::<u64>())
-        .collect();
-
-    let mut cuts: Vec<Cut> = seeds
+    seeds
         .par_iter()
         .map(|&seed| {
             let mut trial_rng = StdRng::seed_from_u64(seed);
@@ -345,23 +300,19 @@ pub fn multi_round_with_pool(
                 cut_value,
             }
         })
-        .collect();
-
-    // Sort descending by cut value, equal cuts in trial order.
-    cuts.sort_by(|a, b| b.cut_value.total_cmp(&a.cut_value));
-    let best = cuts.first().cloned().unwrap_or(Cut {
-        partition: Vec::new(),
-        cut_value: f64::NEG_INFINITY,
-    });
-    cuts.truncate(pool_size);
-
-    (best, cuts)
+        .collect()
 }
 
-/// Runs multiple rounding trials and returns the best cut found.
-///
-/// Extracts unit vectors from the PSD matrix `x` via Cholesky, then delegates
-/// to [`multi_round_from_vectors`].
+/// The `pool_size` best of `cuts`, best first, equal cuts in their order in
+/// `cuts`.
+pub fn best_cuts(mut cuts: Vec<Cut>, pool_size: usize) -> Vec<Cut> {
+    cuts.sort_by(|a, b| b.cut_value.total_cmp(&a.cut_value));
+    cuts.truncate(pool_size);
+    cuts
+}
+
+/// Rounds the PSD matrix `x`'s Cholesky vectors and returns the best cut
+/// of [`round_trials`], the earliest among equals.
 ///
 /// # Errors
 ///
@@ -373,7 +324,20 @@ pub fn multi_round(
     rng: &mut impl Rng,
 ) -> Result<Cut, GwError> {
     let vectors = extract_vectors(x)?;
-    Ok(multi_round_from_vectors(&vectors, graph, plan, rng))
+    let mut cuts = round_trials(&vectors, graph, plan, rng);
+    let best = first_best(&cuts);
+    Ok(cuts.swap_remove(best))
+}
+
+/// The index of the first of the best cuts in the non-empty `cuts`.
+fn first_best(cuts: &[Cut]) -> usize {
+    (1..cuts.len()).fold(0, |best, i| {
+        if cuts[i].cut_value.total_cmp(&cuts[best].cut_value).is_gt() {
+            i
+        } else {
+            best
+        }
+    })
 }
 
 #[cfg(test)]
@@ -459,44 +423,42 @@ mod tests {
     fn the_pool_holds_the_best_cuts_best_first() {
         let graph = random_graph(60, 4.0, 6);
         let vectors = random_vectors(8, 60, 7);
+        let cuts = round_trials(&vectors, &graph, plan(20, 2), &mut StdRng::seed_from_u64(8));
+        let best_value = cuts
+            .iter()
+            .map(|cut| cut.cut_value)
+            .fold(f64::MIN, f64::max);
 
-        let (best, pool) = multi_round_with_pool(
-            &vectors,
-            &graph,
-            plan(20, 2),
-            5,
-            &mut StdRng::seed_from_u64(8),
-        );
+        let pool = best_cuts(cuts, 5);
 
         assert_eq!(pool.len(), 5);
         assert!(
             pool.windows(2)
                 .all(|pair| pair[0].cut_value >= pair[1].cut_value)
         );
-        assert_eq!(best.partition, pool[0].partition);
+        assert_eq!(pool[0].cut_value, best_value);
     }
 
     #[test]
-    fn pooled_and_plain_trials_pick_the_same_best_cut() {
+    fn the_pool_and_the_best_cut_agree_on_the_earliest_best_trial() {
         let graph = random_graph(60, 4.0, 9);
         let vectors = random_vectors(8, 60, 10);
-
-        let plain = multi_round_from_vectors(
+        let cuts = round_trials(
             &vectors,
             &graph,
             plan(20, 0),
             &mut StdRng::seed_from_u64(11),
         );
-        let (pooled, _) = multi_round_with_pool(
-            &vectors,
-            &graph,
-            plan(20, 0),
-            5,
-            &mut StdRng::seed_from_u64(11),
-        );
 
-        assert_eq!(plain.partition, pooled.partition);
-        assert_eq!(plain.cut_value.to_bits(), pooled.cut_value.to_bits());
+        let best = &cuts[first_best(&cuts)];
+        let pool = best_cuts(cuts.clone(), 5);
+
+        assert_eq!(best.partition, pool[0].partition);
+        assert!(
+            cuts.iter()
+                .take(first_best(&cuts))
+                .all(|cut| cut.cut_value < best.cut_value)
+        );
     }
 
     fn angle(radians: f64) -> RotationAngle {
