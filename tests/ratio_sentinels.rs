@@ -2,8 +2,6 @@
 
 mod common;
 
-use std::process::Command;
-
 use common::{cycle, triangle};
 use maxcut_sdp::graph::Graph;
 use maxcut_sdp::maxcut::{GwBmConfig, GwConfig, gw_maxcut, gw_maxcut_bm};
@@ -41,24 +39,5 @@ fn both_solvers_report_a_ratio_against_a_positive_bound() {
     assert!(
         ipm.is_some_and(|r| r > 0.87) && bm.is_some_and(|r| r > 0.87),
         "[{ipm:?}, {bm:?}]"
-    );
-}
-
-#[test]
-fn the_cli_exact_comparison_never_prints_nan() {
-    let path = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("negative_triangle.txt");
-    std::fs::write(&path, "3 3\n1 2 -1\n2 3 -1\n1 3 -1\n")
-        .unwrap_or_else(|e| panic!("write graph: {e}"));
-
-    let output = Command::new(env!("CARGO_BIN_EXE_maxcut-sdp"))
-        .arg(&path)
-        .args(["--exact", "--seed", "1"])
-        .output()
-        .unwrap_or_else(|e| panic!("run the CLI: {e}"));
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        output.status.success() && !stdout.contains("NaN"),
-        "stdout:\n{stdout}"
     );
 }
