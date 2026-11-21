@@ -84,3 +84,28 @@ fn a_time_limit_never_runs_more_restarts_than_asked() {
 
     assert_eq!(result.num_trials, 2 * trials_per_restart.get());
 }
+
+/// Refinement only replaces the best cut with a better one, so a timed run
+/// keeps the untimed run's cut or beats it, and reports its partition's cut.
+#[test]
+fn refinement_never_loses_the_rounded_cut() {
+    let graph = sparse_random_graph(300, 7);
+    let config = |time_limit| GwBmConfig {
+        seed: Some(3),
+        time_limit,
+        ..GwBmConfig::default()
+    };
+
+    let untimed = gw_maxcut_bm(&graph, &config(None));
+    let timed = gw_maxcut_bm(&graph, &config(Some(Duration::from_secs(1))));
+
+    let untimed = untimed.unwrap_or_else(|e| panic!("untimed run failed: {e}"));
+    let timed = timed.unwrap_or_else(|e| panic!("timed run failed: {e}"));
+    assert!(
+        timed.cut_value >= untimed.cut_value,
+        "{} < {}",
+        timed.cut_value,
+        untimed.cut_value
+    );
+    assert_eq!(timed.cut_value, graph.cut_value(&timed.partition));
+}
