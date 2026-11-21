@@ -46,7 +46,7 @@ impl ConstraintMatrix {
     ///
     /// # Errors
     ///
-    /// Returns [`GwError::DimensionMismatch`] if a dense `A` and `Y` differ in shape.
+    /// Returns [`GwError::ShapeMismatch`] if a dense `A` and `Y` differ in shape.
     pub fn inner_product(&self, y: &DenseMatrix) -> Result<f64, GwError> {
         match self {
             Self::DiagonalUnit(k) => Ok(y.get(*k, *k)),
@@ -58,7 +58,7 @@ impl ConstraintMatrix {
     ///
     /// # Errors
     ///
-    /// Returns [`GwError::DimensionMismatch`] if a dense `A` and `target` differ in shape.
+    /// Returns [`GwError::ShapeMismatch`] if a dense `A` and `target` differ in shape.
     pub fn add_scaled_to(&self, target: &mut DenseMatrix, coeff: f64) -> Result<(), GwError> {
         match self {
             Self::DiagonalUnit(k) => {

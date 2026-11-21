@@ -283,59 +283,40 @@ impl DenseMatrix {
     ///
     /// # Errors
     ///
-    /// Returns [`GwError::DimensionMismatch`] if dimensions differ.
+    /// Returns [`GwError::ShapeMismatch`] if the shapes differ.
     pub fn sub(&self, other: &Self) -> Result<Self, GwError> {
-        if self.rows != other.rows || self.cols != other.cols {
-            return Err(GwError::DimensionMismatch {
-                expected: self.rows * self.cols,
-                got: other.rows * other.cols,
-            });
-        }
-        let data: Vec<f64> = self
-            .data
-            .iter()
-            .zip(&other.data)
-            .map(|(&a, &b)| a - b)
-            .collect();
-        Ok(Self {
-            data,
-            rows: self.rows,
-            cols: self.cols,
-        })
+        let mut difference = self.clone();
+        difference.sub_assign(other)?;
+        Ok(difference)
     }
 
     /// Adds `other` to `self` in-place.
     ///
     /// # Errors
     ///
-    /// Returns [`GwError::DimensionMismatch`] if dimensions differ.
+    /// Returns [`GwError::ShapeMismatch`] if the shapes differ.
     pub fn add_assign(&mut self, other: &Self) -> Result<(), GwError> {
-        if self.rows != other.rows || self.cols != other.cols {
-            return Err(GwError::DimensionMismatch {
-                expected: self.rows * self.cols,
-                got: other.rows * other.cols,
-            });
-        }
-        for (a, &b) in self.data.iter_mut().zip(&other.data) {
-            *a += b;
-        }
-        Ok(())
+        self.zip_assign(other, |a, b| a + b)
     }
 
     /// Subtracts `other` from `self` in-place.
     ///
     /// # Errors
     ///
-    /// Returns [`GwError::DimensionMismatch`] if dimensions differ.
+    /// Returns [`GwError::ShapeMismatch`] if the shapes differ.
     pub fn sub_assign(&mut self, other: &Self) -> Result<(), GwError> {
-        if self.rows != other.rows || self.cols != other.cols {
-            return Err(GwError::DimensionMismatch {
-                expected: self.rows * self.cols,
-                got: other.rows * other.cols,
-            });
-        }
+        self.zip_assign(other, |a, b| a - b)
+    }
+
+    /// Replaces each element `a` with `combine(a, b)` for `other`'s `b`.
+    fn zip_assign(
+        &mut self,
+        other: &Self,
+        combine: impl Fn(f64, f64) -> f64,
+    ) -> Result<(), GwError> {
+        self.ensure_same_shape(other)?;
         for (a, &b) in self.data.iter_mut().zip(&other.data) {
-            *a -= b;
+            *a = combine(*a, b);
         }
         Ok(())
     }
@@ -366,14 +347,9 @@ impl DenseMatrix {
     ///
     /// # Errors
     ///
-    /// Returns [`GwError::DimensionMismatch`] if dimensions differ.
+    /// Returns [`GwError::ShapeMismatch`] if the shapes differ.
     pub fn inner_product(&self, other: &Self) -> Result<f64, GwError> {
-        if self.rows != other.rows || self.cols != other.cols {
-            return Err(GwError::DimensionMismatch {
-                expected: self.rows * self.cols,
-                got: other.rows * other.cols,
-            });
-        }
+        self.ensure_same_shape(other)?;
         Ok(dot(&self.data, &other.data))
     }
 
@@ -393,13 +369,8 @@ impl DenseMatrix {
     /// Returns [`GwError::NotPositiveDefinite`] if the matrix is not positive definite,
     /// or [`GwError::InvalidMatrix`] if the matrix is not square.
     pub fn cholesky(&self) -> Result<Self, GwError> {
+        self.ensure_square("Cholesky")?;
         let n = self.rows;
-        if n != self.cols {
-            return Err(GwError::InvalidMatrix(format!(
-                "Cholesky requires square matrix, got {n}x{}",
-                self.cols
-            )));
-        }
 
         // Copy lower triangle into output.
         let mut l = Self::zeros(n, n);
@@ -491,13 +462,8 @@ impl DenseMatrix {
     /// a non-finite entry, and [`GwError::SolverFailed`] if the sweeps do not
     /// converge.
     pub fn eigendecomposition_symmetric(&self) -> Result<(Vec<f64>, Self), GwError> {
+        self.ensure_square("eigendecomposition")?;
         let n = self.rows;
-        if n != self.cols {
-            return Err(GwError::InvalidMatrix(format!(
-                "eigendecomposition requires square matrix, got {n}x{}",
-                self.cols
-            )));
-        }
         if n == 0 {
             return Ok((Vec::new(), Self::zeros(0, 0)));
         }
@@ -505,11 +471,7 @@ impl DenseMatrix {
             return Ok((vec![self.data[0]], Self::identity(1)));
         }
 
-        if !self.data.iter().all(|x| x.is_finite()) {
-            return Err(GwError::InvalidMatrix(
-                "eigendecomposition of a matrix with a non-finite entry".to_string(),
-            ));
-        }
+        self.ensure_finite("eigendecomposition")?;
 
         // Work on a copy that we'll diagonalize in-place.
         let mut a = self.data.clone();
@@ -655,20 +617,11 @@ impl DenseMatrix {
     /// Returns [`GwError::InvalidMatrix`] if the matrix is empty, not square,
     /// or has a non-finite entry.
     pub fn min_eigenvalue(&self) -> Result<f64, GwError> {
-        if self.rows != self.cols {
-            return Err(GwError::InvalidMatrix(format!(
-                "minimum eigenvalue requires square matrix, got {}x{}",
-                self.rows, self.cols
-            )));
-        }
+        self.ensure_square("minimum eigenvalue")?;
         if self.rows == 0 {
             return Err(GwError::InvalidMatrix("empty matrix".to_string()));
         }
-        if !self.data.iter().all(|x| x.is_finite()) {
-            return Err(GwError::InvalidMatrix(
-                "minimum eigenvalue of a matrix with a non-finite entry".to_string(),
-            ));
-        }
+        self.ensure_finite("minimum eigenvalue")?;
         let largest = self.data.iter().fold(0.0_f64, |m, x| m.max(x.abs()));
         if largest == 0.0 {
             return Ok(0.0);
@@ -746,6 +699,35 @@ impl DenseMatrix {
             let clamped = lam.max(floor);
             Ok(1.0 / clamped)
         })
+    }
+
+    fn ensure_same_shape(&self, other: &Self) -> Result<(), GwError> {
+        if (self.rows, self.cols) == (other.rows, other.cols) {
+            return Ok(());
+        }
+        Err(GwError::ShapeMismatch {
+            expected: (self.rows, self.cols),
+            got: (other.rows, other.cols),
+        })
+    }
+
+    fn ensure_square(&self, operation: &str) -> Result<(), GwError> {
+        if self.rows == self.cols {
+            return Ok(());
+        }
+        Err(GwError::InvalidMatrix(format!(
+            "{operation} requires a square matrix, got {}x{}",
+            self.rows, self.cols
+        )))
+    }
+
+    fn ensure_finite(&self, operation: &str) -> Result<(), GwError> {
+        if self.data.iter().all(|x| x.is_finite()) {
+            return Ok(());
+        }
+        Err(GwError::InvalidMatrix(format!(
+            "{operation} of a matrix with a non-finite entry"
+        )))
     }
 }
 
