@@ -157,7 +157,25 @@ src/
     ├── rounding.rs      Hyperplane rounding, one-flip local search, ILS
     ├── exact.rs         Brute-force exact solver (small graphs)
     └── MATH.md          Mathematical reference
+tests/                   Integration tests, with shared graph builders in common/
+benches/maxcut_bench.rs  Criterion benchmarks of the solvers and the pipeline
+scripts/
+├── benchmark.sh         Gset benchmark run, CSV to stdout
+├── download.py          Fetch Biq Mac (small, rudy, ising) and Gset instances
+├── plot.py              Charts from the benchmark CSV
+├── gen_random_graph.py  Random sparse graph generator
+└── best_known.txt       Best-known Gset cut values
+charts/                  Charts shown above
 ```
+
+## Testing
+
+```bash
+cargo test --release   # release mode: the seeded 3,000-vertex tests take minutes unoptimized
+cargo bench            # criterion benchmarks
+```
+
+CI runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --release` and `cargo doc --no-deps` on pushes to main and on pull requests.
 
 ## References
 
