@@ -26,7 +26,8 @@ fn maxcut_relaxation(graph: &Graph) -> SdpProblem {
 fn sdp_2x2_worked_example() {
     let a1 = DenseMatrix::from_vec(2, 2, vec![0.0, 1.0, 1.0, 0.0])
         .unwrap_or_else(|e| panic!("from_vec failed: {e}"));
-    let mut problem = SdpProblem::new(DenseMatrix::identity(2));
+    let mut problem =
+        SdpProblem::new(DenseMatrix::identity(2)).unwrap_or_else(|e| panic!("new failed: {e}"));
     // tr(A1 X) = 2*x_12 = 2, so x_12 = 1
     problem
         .add_constraint(ConstraintMatrix::Dense(a1), 2.0)
@@ -91,7 +92,8 @@ fn stopping_before_convergence_is_an_error() {
 
 #[test]
 fn a_problem_refuses_a_constraint_of_another_size() {
-    let mut problem = SdpProblem::new(DenseMatrix::identity(2));
+    let mut problem =
+        SdpProblem::new(DenseMatrix::identity(2)).unwrap_or_else(|e| panic!("new failed: {e}"));
 
     let added = problem.add_constraint(ConstraintMatrix::DiagonalUnit(2), 1.0);
 
@@ -103,4 +105,11 @@ fn the_empty_graph_has_no_relaxation() {
     let problem = SdpProblem::maxcut_relaxation(&Graph::new(0));
 
     assert!(matches!(problem, Err(GwError::InvalidGraph(_))));
+}
+
+#[test]
+fn a_problem_refuses_a_non_square_cost() {
+    let problem = SdpProblem::new(DenseMatrix::zeros(2, 3));
+
+    assert!(matches!(problem, Err(GwError::InvalidMatrix(_))));
 }

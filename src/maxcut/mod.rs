@@ -239,7 +239,7 @@ pub fn gw_maxcut(graph: &Graph, config: &GwConfig) -> Result<MaxCutResult, GwErr
 
     // The Max-Cut SDP maximizes (1/4) tr(LX) = -tr(CX). The converged dual
     // is feasible only to within the tolerance, so its objective is certified.
-    let sdp_bound = SdpBound::Certified(certified_bound(problem.c, &solution.y)?);
+    let sdp_bound = SdpBound::Certified(certified_bound(problem.into_cost(), &solution.y)?);
 
     // 3. Round with random hyperplanes.
     let mut rng = config
@@ -484,7 +484,8 @@ mod tests {
             .solve(&problem)
             .unwrap_or_else(|e| panic!("{e}"));
 
-        let bound = certified_bound(problem.c, &solution.y).unwrap_or_else(|e| panic!("{e}"));
+        let bound =
+            certified_bound(problem.into_cost(), &solution.y).unwrap_or_else(|e| panic!("{e}"));
 
         assert!(
             bound >= 4.0,

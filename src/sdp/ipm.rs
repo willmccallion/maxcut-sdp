@@ -79,8 +79,8 @@ impl IpmSolver {
     /// failure during iteration) or when `config.max_iterations` pass without
     /// converging.
     pub fn solve(&self, problem: &SdpProblem) -> Result<SdpSolution, GwError> {
-        let n = problem.n;
-        let m = problem.constraints.len();
+        let n = problem.dimension();
+        let m = problem.constraints().len();
         let (mut x, mut y, mut s) = self.initialize(problem)?;
 
         let mut iterations = 0;
@@ -117,11 +117,11 @@ impl IpmSolver {
         }
 
         let primal_obj = problem
-            .c
+            .cost()
             .inner_product(&x)
             .map_err(|e| GwError::SolverFailed(format!("primal obj: {e}")))?;
         let dual_obj: f64 = problem
-            .constraints
+            .constraints()
             .iter()
             .zip(&y)
             .map(|(c, &yi)| c.b * yi)
@@ -131,7 +131,6 @@ impl IpmSolver {
         Ok(SdpSolution {
             x,
             y,
-            s,
             primal_obj,
             dual_obj,
             duality_gap,
@@ -153,15 +152,15 @@ impl IpmSolver {
         &self,
         problem: &SdpProblem,
     ) -> Result<(DenseMatrix, Vec<f64>, DenseMatrix), GwError> {
-        let n = problem.n;
-        let m = problem.constraints.len();
+        let n = problem.dimension();
+        let m = problem.constraints().len();
 
         let x = DenseMatrix::identity(n);
         let y = vec![0.0; m];
 
         // S = C - Σ y_i A_i = C (since y = 0).
         // If C is not PD, shift: S = C + α I to ensure S ≻ 0.
-        let mut s = problem.c.clone();
+        let mut s = problem.cost().clone();
         let min_eig = s
             .min_eigenvalue()
             .map_err(|e| GwError::SolverFailed(format!("init eigenvalue: {e}")))?;
@@ -235,12 +234,12 @@ impl IpmSolver {
         s: &DenseMatrix,
         mu: f64,
     ) -> Result<(DenseMatrix, Vec<f64>), GwError> {
-        let m = problem.constraints.len();
+        let m = problem.constraints().len();
 
         let scaled: Vec<ScaledConstraint<'_>> = problem
-            .constraints
+            .constraints()
             .iter()
-            .map(|ci| ScaledConstraint::new(&ci.a, w))
+            .map(|ci| ScaledConstraint::new(ci.matrix(), w))
             .collect::<Result<_, _>>()?;
 
         // M_ij = tr(A_i W A_j W)
@@ -269,17 +268,19 @@ impl IpmSolver {
             .map_err(|e| GwError::SolverFailed(format!("Schur W*Rd*W: {e}")))?;
 
         let mut h = vec![0.0; m];
-        for (i, ci) in problem.constraints.iter().enumerate() {
-            let rp = ci.b
-                - ci.a
+        for (i, ci) in problem.constraints().iter().enumerate() {
+            let rp = ci.rhs()
+                - ci.matrix()
                     .inner_product(x)
                     .map_err(|e| GwError::SolverFailed(format!("Schur rp: {e}")))?;
-            let center_term =
-                ci.a.inner_product(&centering)
-                    .map_err(|e| GwError::SolverFailed(format!("Schur center: {e}")))?;
-            let rd_term =
-                ci.a.inner_product(&w_rd_w)
-                    .map_err(|e| GwError::SolverFailed(format!("Schur rd_term: {e}")))?;
+            let center_term = ci
+                .matrix()
+                .inner_product(&centering)
+                .map_err(|e| GwError::SolverFailed(format!("Schur center: {e}")))?;
+            let rd_term = ci
+                .matrix()
+                .inner_product(&w_rd_w)
+                .map_err(|e| GwError::SolverFailed(format!("Schur rd_term: {e}")))?;
             h[i] = rp - center_term + rd_term;
         }
 
@@ -320,8 +321,9 @@ impl IpmSolver {
 
         // ΔS = R_d − Σ Δy_i A_i
         let mut ds = Self::dual_residual(problem, y, s)?;
-        for (ci, &dyi) in problem.constraints.iter().zip(&dy) {
-            ci.a.add_scaled_to(&mut ds, -dyi)
+        for (ci, &dyi) in problem.constraints().iter().zip(&dy) {
+            ci.matrix()
+                .add_scaled_to(&mut ds, -dyi)
                 .map_err(|e| GwError::SolverFailed(format!("ds update: {e}")))?;
         }
 
@@ -391,7 +393,7 @@ impl IpmSolver {
     ) -> Result<bool, GwError> {
         let solver_failed = |what: &str, e: GwError| GwError::SolverFailed(format!("{what}: {e}"));
         let primal_obj = problem
-            .c
+            .cost()
             .inner_product(x)
             .map_err(|e| solver_failed("convergence primal obj", e))?;
         let xs = x
@@ -401,12 +403,13 @@ impl IpmSolver {
 
         let mut primal_residual_sq = 0.0_f64;
         let mut b_sq = 0.0_f64;
-        for ci in &problem.constraints {
-            let ax =
-                ci.a.inner_product(x)
-                    .map_err(|e| solver_failed("convergence A(X)", e))?;
-            primal_residual_sq = (ci.b - ax).mul_add(ci.b - ax, primal_residual_sq);
-            b_sq = ci.b.mul_add(ci.b, b_sq);
+        for ci in problem.constraints() {
+            let ax = ci
+                .matrix()
+                .inner_product(x)
+                .map_err(|e| solver_failed("convergence A(X)", e))?;
+            primal_residual_sq = (ci.rhs() - ax).mul_add(ci.rhs() - ax, primal_residual_sq);
+            b_sq = ci.rhs().mul_add(ci.rhs(), b_sq);
         }
         let primal_infeasibility = primal_residual_sq.sqrt() / (1.0 + b_sq.sqrt());
 
@@ -416,8 +419,8 @@ impl IpmSolver {
             .map_err(|e| solver_failed("convergence |Rd|", e))?
             .sqrt();
         let c_norm = problem
-            .c
-            .inner_product(&problem.c)
+            .cost()
+            .inner_product(problem.cost())
             .map_err(|e| solver_failed("convergence |C|", e))?
             .sqrt();
         let dual_infeasibility = rd_norm / (1.0 + c_norm);
@@ -431,9 +434,10 @@ impl IpmSolver {
         y: &[f64],
         s: &DenseMatrix,
     ) -> Result<DenseMatrix, GwError> {
-        let mut rd = problem.c.clone();
-        for (ci, &yi) in problem.constraints.iter().zip(y) {
-            ci.a.add_scaled_to(&mut rd, -yi)
+        let mut rd = problem.cost().clone();
+        for (ci, &yi) in problem.constraints().iter().zip(y) {
+            ci.matrix()
+                .add_scaled_to(&mut rd, -yi)
                 .map_err(|e| GwError::SolverFailed(format!("Rd accum: {e}")))?;
         }
         rd.sub_assign(s)
