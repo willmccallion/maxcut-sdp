@@ -32,6 +32,10 @@ const MAX_JACOBI_SWEEPS: usize = 100;
 /// Jacobi sweeps have converged; relative so any scale is solved alike.
 const JACOBI_REL_TOL: f64 = 1e-14;
 
+/// Eigenvalues `sqrt_spd` takes as zero, rounding error of a PSD matrix,
+/// down to minus this.
+const NEGATIVE_EIGENVALUE_TOLERANCE: f64 = 1e-12;
+
 /// Opening Jacobi sweeps that skip entries small against the off-diagonal
 /// norm; later sweeps rotate every nonzero entry.
 const THRESHOLD_SWEEPS: usize = 3;
@@ -195,9 +199,7 @@ impl DenseMatrix {
     pub fn transpose(&self) -> Self {
         let (r, c) = (self.rows, self.cols);
         let mut out = Self::zeros(c, r);
-        // Iterate output columns = input rows. Writing contiguous output
-        // columns is cache-friendly for the output; reading along input
-        // rows strides by `r` but each output column is a full pass.
+        // Each output column is written contiguously; the reads stride by `r`.
         for j in 0..r {
             let out_col = col_mut(&mut out.data, j, c);
             for (i, val) in out_col.iter_mut().enumerate() {
@@ -225,11 +227,8 @@ impl DenseMatrix {
         }
         let mut c = Self::zeros(m, n);
 
-        // Blocked multiply: C += A[:,kb..kb+BLOCK] * B[kb..kb+BLOCK, :]
-        // The jb loop iterates over output column blocks,
-        // the kb loop over the shared dimension,
-        // the ib loop over output row blocks.
-        // Inner kernel: rank-1-style column update via axpy.
+        // C += A[:, kb..kb+BLOCK] · B[kb..kb+BLOCK, jb..jb+BLOCK], tile by
+        // tile, so the BLOCK columns of A in use stay in cache.
         let a = &self.data;
         let b = &other.data;
         let cd = &mut c.data;
@@ -303,10 +302,7 @@ impl DenseMatrix {
             });
         }
         let mut c = Self::zeros(m, n);
-        // C[i,j] = row_i(self) · row_j(other) = Σ_p self[i,p]*other[j,p]
-        // Rewrite as column-oriented: for each column p, outer-product update
-        // C += self[:,p] * other[:,p]^T  — but that's O(m·n) per p.
-        // Instead use the blocked approach on the k-dimension.
+        // C[:, j] += other[j, p] · self[:, p], over p in runs of BLOCK.
         let a = &self.data;
         let bt = &other.data;
         let cd = &mut c.data;
@@ -418,7 +414,6 @@ impl DenseMatrix {
         self.ensure_square("Cholesky")?;
         let n = self.rows;
 
-        // Copy lower triangle into output.
         let mut l = Self::zeros(n, n);
         for j in 0..n {
             for i in j..n {
@@ -433,7 +428,6 @@ impl DenseMatrix {
             // L[j:n, j] -= L[j:n, 0:j] * L[j, 0:j]^T
             for k in 0..j {
                 let l_jk = d[idx(j, k, n)];
-                // Subtract l_jk * L[j:n, k] from L[j:n, j]
                 for i in j..n {
                     d[idx(i, j, n)] = l_jk.mul_add(-d[idx(i, k, n)], d[idx(i, j, n)]);
                 }
@@ -445,7 +439,6 @@ impl DenseMatrix {
             }
             let inv_sqrt = 1.0 / diag.sqrt();
 
-            // Scale column j.
             for i in j..n {
                 d[idx(i, j, n)] *= inv_sqrt;
             }
@@ -581,12 +574,12 @@ impl DenseMatrix {
     ///
     /// # Errors
     ///
-    /// Returns an error if eigendecomposition fails.
+    /// As [`eigendecomposition_symmetric`](Self::eigendecomposition_symmetric),
+    /// or the first error `f` returns.
     pub fn apply_eigen_fn(&self, f: impl Fn(f64) -> Result<f64, GwError>) -> Result<Self, GwError> {
         let (eigenvalues, q) = self.eigendecomposition_symmetric()?;
         let n = q.rows;
 
-        // Build Q · diag(f(λ)) — scale each column of Q by f(λ_j).
         let mut q_scaled = q.clone();
         for (j, &eigval) in eigenvalues.iter().enumerate() {
             let fval = f(eigval)?;
@@ -611,7 +604,7 @@ impl DenseMatrix {
     /// Returns [`GwError::NotPositiveDefinite`] if any eigenvalue is negative.
     pub fn sqrt_spd(&self) -> Result<Self, GwError> {
         self.apply_eigen_fn(|lam| {
-            if lam < -1e-12 {
+            if lam < -NEGATIVE_EIGENVALUE_TOLERANCE {
                 return Err(GwError::NotPositiveDefinite);
             }
             Ok(lam.max(0.0).sqrt())
@@ -637,7 +630,7 @@ impl DenseMatrix {
     ///
     /// # Errors
     ///
-    /// Returns an error if eigendecomposition fails.
+    /// As [`eigendecomposition_symmetric`](Self::eigendecomposition_symmetric).
     pub fn inverse_regularized(&self, floor: f64) -> Result<Self, GwError> {
         self.apply_eigen_fn(|lam| {
             let clamped = lam.max(floor);
