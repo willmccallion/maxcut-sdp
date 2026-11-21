@@ -24,6 +24,10 @@ use crate::GwError;
 /// See [`MATH.md`](./MATH.md) §6.
 const EIGENVALUE_FLOOR: f64 = 1e-14;
 
+/// Added to the Schur complement's diagonal so its Cholesky factorization
+/// survives rounding error near the optimum.
+const SCHUR_REGULARIZATION: f64 = 1e-12;
+
 /// Centering parameter `σ`: each step targets `μ_next = σ μ`. See [`MATH.md`](./MATH.md) §3.6.
 const CENTERING: f64 = 0.2;
 
@@ -162,10 +166,7 @@ impl Solver {
             .min_eigenvalue()
             .map_err(|e| GwError::SolverFailed(format!("init eigenvalue: {e}")))?;
         if min_eig <= 0.0 {
-            let shift = -min_eig + 1.0;
-            let shift_mat = DenseMatrix::identity(n).scale(shift);
-            s.add_assign(&shift_mat)
-                .map_err(|e| GwError::SolverFailed(format!("init shift: {e}")))?;
+            s.add_to_diagonal(-min_eig + 1.0);
         }
 
         Ok((x, y, s))
@@ -305,17 +306,11 @@ impl Solver {
         mu: f64,
         w: &DenseMatrix,
     ) -> Result<(DenseMatrix, Vec<f64>, DenseMatrix), GwError> {
-        let m = problem.constraints.len();
-
         // Form and solve Schur complement system.
         let (schur, h) = Self::form_schur_complement(problem, w, x, y, s, mu)?;
 
-        // Add small regularization for numerical stability.
         let mut schur_reg = schur;
-        let reg = 1e-12;
-        for i in 0..m {
-            schur_reg.set(i, i, schur_reg.get(i, i) + reg);
-        }
+        schur_reg.add_to_diagonal(SCHUR_REGULARIZATION);
 
         let l_schur = schur_reg
             .cholesky()

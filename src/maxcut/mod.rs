@@ -109,9 +109,7 @@ pub fn cut_ratio(cut: f64, reference: f64, scale: f64) -> Option<f64> {
 /// when it is not. Exact up to the floating-point accuracy of `λ_min`.
 fn certified_bound(cost: DenseMatrix, y: &[f64]) -> Result<f64, GwError> {
     let mut s = cost;
-    for (i, &yi) in y.iter().enumerate() {
-        s.set(i, i, s.get(i, i) - yi);
-    }
+    s.sub_diagonal(y);
     let lambda_min = s.min_eigenvalue()?;
     let dual_objective: f64 = y.iter().sum();
     Ok((y.len() as f64).mul_add((-lambda_min).max(0.0), -dual_objective))
