@@ -89,6 +89,9 @@ cargo build --release
 
 # Reproduce benchmarks
 mkdir -p results && ./scripts/benchmark.sh > results/gset.csv
+
+# Generate a random sparse graph: 5,000 vertices, about five neighbours each
+./scripts/gen_random_graph.py 5000 > random_5000.txt
 ```
 
 ### CLI Options
