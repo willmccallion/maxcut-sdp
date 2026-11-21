@@ -8,14 +8,10 @@ use std::time::{Duration, Instant};
 use common::sparse_random_graph;
 use maxcut_sdp::graph::Graph;
 use maxcut_sdp::maxcut::{GwBmConfig, gw_maxcut_bm};
-use maxcut_sdp::sdp::bm::BmSolverConfig;
 
 fn elapsed_with_budget(graph: &Graph, num_restarts: usize, budget: Duration) -> Duration {
     let config = GwBmConfig {
-        solver_config: BmSolverConfig {
-            num_restarts,
-            ..BmSolverConfig::default()
-        },
+        num_restarts: NonZeroUsize::new(num_restarts).unwrap_or_else(|| panic!("no restarts")),
         seed: Some(1),
         time_limit: Some(budget),
         ..GwBmConfig::default()
@@ -71,10 +67,7 @@ fn a_time_limit_never_runs_more_restarts_than_asked() {
     let config = GwBmConfig {
         num_trials: trials_per_restart,
         ils_rounds: 5,
-        solver_config: BmSolverConfig {
-            num_restarts: 2,
-            ..BmSolverConfig::default()
-        },
+        num_restarts: NonZeroUsize::new(2).unwrap_or_else(|| panic!("2 restarts")),
         seed: Some(1),
         time_limit: Some(Duration::from_secs(2)),
         ..GwBmConfig::default()
