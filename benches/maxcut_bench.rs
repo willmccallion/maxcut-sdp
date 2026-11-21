@@ -7,60 +7,106 @@
 #[path = "../tests/common/mod.rs"]
 mod common;
 
-use common::{complete, cycle};
+use common::{complete, cycle, sparse_random_graph};
 use criterion::{Criterion, criterion_group, criterion_main};
+use maxcut_sdp::maxcut::{GwBmConfig, gw_maxcut_bm};
+use maxcut_sdp::sdp::SdpProblem;
 use maxcut_sdp::sdp::linalg::DenseMatrix;
+use maxcut_sdp::sdp::solver::{Solver, SolverConfig};
+use maxcut_sdp::sdp::solver_bm::{BmSolver, BmSolverConfig};
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+
+/// Samples for the benchmarks whose single run takes a large fraction of a second.
+const SLOW_SAMPLES: usize = 10;
+
+/// `L(K_n) + I`, which is symmetric positive definite.
+fn spd_matrix(n: usize) -> DenseMatrix {
+    let mut a = complete(n).laplacian();
+    for i in 0..n {
+        a.set(i, i, a.get(i, i) + 1.0);
+    }
+    a
+}
 
 fn bench_cholesky(c: &mut Criterion) {
     let mut group = c.benchmark_group("cholesky");
-    for &n in &[5, 10, 20, 50] {
-        let id = format!("{n}x{n}");
-
-        // Build a known SPD matrix: A = I + ones (diagonally dominant)
-        let mut data = vec![0.0_f64; n * n];
-        for i in 0..n {
-            for j in 0..n {
-                data[i + j * n] = 1.0;
-            }
-            data[i + i * n] += n as f64;
-        }
-        let m = DenseMatrix::from_vec(n, n, data).unwrap_or_else(|_| panic!("from_vec failed"));
-
-        let _ = group.bench_function(&id, |b| {
-            b.iter(|| {
-                let _ = m.cholesky();
-            });
-        });
+    for n in [5, 10, 20, 50] {
+        let a = spd_matrix(n);
+        let _ = group.bench_function(format!("{n}x{n}"), |b| b.iter(|| a.cholesky()));
     }
-    drop(group);
+    group.finish();
 }
 
 fn bench_laplacian(c: &mut Criterion) {
     let mut group = c.benchmark_group("laplacian");
-    for &n in &[5, 10, 20, 50] {
+    for n in [5, 10, 20, 50] {
         let g = complete(n);
-        let _ = group.bench_function(format!("K{n}"), |b| {
-            b.iter(|| {
-                let _ = g.laplacian();
-            });
-        });
+        let _ = group.bench_function(format!("K{n}"), |b| b.iter(|| g.laplacian()));
     }
-    drop(group);
+    group.finish();
 }
 
 fn bench_eigenvalues(c: &mut Criterion) {
     let mut group = c.benchmark_group("eigenvalues");
-    for &n in &[5, 10, 20] {
-        let g = cycle(n);
-        let l = g.laplacian();
+    for n in [5, 10, 20] {
+        let l = cycle(n).laplacian();
         let _ = group.bench_function(format!("C{n}_laplacian"), |b| {
-            b.iter(|| {
-                let _ = l.eigenvalues_symmetric();
-            });
+            b.iter(|| l.eigenvalues_symmetric());
         });
     }
-    drop(group);
+    group.finish();
 }
 
-criterion_group!(benches, bench_cholesky, bench_laplacian, bench_eigenvalues);
+fn bench_min_eigenvalue(c: &mut Criterion) {
+    let mut group = c.benchmark_group("min_eigenvalue");
+    let _ = group.sample_size(SLOW_SAMPLES);
+    for n in [200, 500] {
+        let l = sparse_random_graph(n, 1).laplacian();
+        let _ = group.bench_function(format!("sparse_{n}_laplacian"), |b| {
+            b.iter(|| l.min_eigenvalue());
+        });
+    }
+    group.finish();
+}
+
+fn bench_ipm(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ipm_solve");
+    let _ = group.sample_size(SLOW_SAMPLES);
+    let solver = Solver::new(SolverConfig::default());
+    for n in [21, 51] {
+        let problem = SdpProblem::maxcut_relaxation(&cycle(n))
+            .unwrap_or_else(|e| panic!("relaxation failed: {e}"));
+        let _ = group.bench_function(format!("C{n}"), |b| b.iter(|| solver.solve(&problem)));
+    }
+    group.finish();
+}
+
+fn bench_bm(c: &mut Criterion) {
+    let mut group = c.benchmark_group("bm");
+    let _ = group.sample_size(SLOW_SAMPLES);
+    let graph = sparse_random_graph(1000, 1);
+    let solver = BmSolver::new(BmSolverConfig::default());
+    let _ = group.bench_function("solve_sparse_1000", |b| {
+        b.iter(|| solver.solve_maxcut(&graph, &mut StdRng::seed_from_u64(1)));
+    });
+    let config = GwBmConfig {
+        seed: Some(1),
+        ..GwBmConfig::default()
+    };
+    let _ = group.bench_function("solve_and_round_sparse_1000", |b| {
+        b.iter(|| gw_maxcut_bm(&graph, &config));
+    });
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_cholesky,
+    bench_laplacian,
+    bench_eigenvalues,
+    bench_min_eigenvalue,
+    bench_ipm,
+    bench_bm
+);
 criterion_main!(benches);
