@@ -11,13 +11,14 @@ fn graph_file(name: &str, contents: &str) -> PathBuf {
     path
 }
 
-/// A cycle on `n` vertices in Biq Mac format.
-fn cycle_file(n: usize) -> PathBuf {
+/// A cycle on `n` vertices in Biq Mac format, in a file of `test`'s own,
+/// since the tests run in parallel.
+fn cycle_file(n: usize, test: &str) -> PathBuf {
     let mut text = format!("{n} {n}\n");
     for i in 1..=n {
         writeln!(text, "{i} {} 1", i % n + 1).unwrap_or_else(|e| panic!("{e}"));
     }
-    graph_file(&format!("cycle_{n}.txt"), &text)
+    graph_file(&format!("{test}_cycle_{n}.txt"), &text)
 }
 
 fn run(path: &Path, args: &[&str]) -> Output {
@@ -38,7 +39,10 @@ fn stderr(output: &Output) -> String {
 
 #[test]
 fn the_default_solves_a_large_graph_with_bm() {
-    let output = run(&cycle_file(101), &["--seed", "1", "--trials", "1"]);
+    let output = run(
+        &cycle_file(101, "the_default_solves_a_large_graph_with_bm"),
+        &["--seed", "1", "--trials", "1"],
+    );
 
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(
@@ -60,7 +64,10 @@ fn the_exact_comparison_never_prints_nan() {
 
 #[test]
 fn zero_trials_are_refused_without_crashing() {
-    let output = run(&cycle_file(5), &["--trials", "0", "--seed", "1"]);
+    let output = run(
+        &cycle_file(5, "zero_trials_are_refused_without_crashing"),
+        &["--trials", "0", "--seed", "1"],
+    );
 
     assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
     assert!(stderr(&output).contains("--trials") && !stderr(&output).contains("panicked"));
@@ -68,7 +75,10 @@ fn zero_trials_are_refused_without_crashing() {
 
 #[test]
 fn zero_restarts_are_refused() {
-    let output = run(&cycle_file(5), &["--solver", "bm", "--restarts", "0"]);
+    let output = run(
+        &cycle_file(5, "zero_restarts_are_refused"),
+        &["--solver", "bm", "--restarts", "0"],
+    );
 
     assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
     assert!(
@@ -80,7 +90,10 @@ fn zero_restarts_are_refused() {
 
 #[test]
 fn a_rank_past_the_vertex_count_is_refused() {
-    let output = run(&cycle_file(5), &["--solver", "bm", "--rank", "6"]);
+    let output = run(
+        &cycle_file(5, "a_rank_past_the_vertex_count_is_refused"),
+        &["--solver", "bm", "--rank", "6"],
+    );
 
     assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
     assert!(stderr(&output).contains("rank 6"), "{}", stderr(&output));
@@ -88,7 +101,10 @@ fn a_rank_past_the_vertex_count_is_refused() {
 
 #[test]
 fn a_rotation_past_a_right_angle_is_refused() {
-    let output = run(&cycle_file(5), &["--rotation", "2.0"]);
+    let output = run(
+        &cycle_file(5, "a_rotation_past_a_right_angle_is_refused"),
+        &["--rotation", "2.0"],
+    );
 
     assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
     assert!(
@@ -100,7 +116,7 @@ fn a_rotation_past_a_right_angle_is_refused() {
 
 #[test]
 fn format_overrides_the_detected_one() {
-    let path = cycle_file(5);
+    let path = cycle_file(5, "format_overrides_the_detected_one");
 
     let as_biqmac = run(&path, &["--format", "biqmac", "--seed", "1"]);
     let as_dimacs = run(&path, &["--format", "dimacs", "--seed", "1"]);
