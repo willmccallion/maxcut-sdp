@@ -4,8 +4,11 @@
     reason = "criterion_group! generates an undocumented pub fn"
 )]
 
+#[path = "../tests/common/mod.rs"]
+mod common;
+
+use common::{complete, cycle};
 use criterion::{Criterion, criterion_group, criterion_main};
-use maxcut_sdp::bench::{generate_complete_graph, generate_cycle};
 use maxcut_sdp::sdp::linalg::DenseMatrix;
 
 fn bench_cholesky(c: &mut Criterion) {
@@ -35,7 +38,7 @@ fn bench_cholesky(c: &mut Criterion) {
 fn bench_laplacian(c: &mut Criterion) {
     let mut group = c.benchmark_group("laplacian");
     for &n in &[5, 10, 20, 50] {
-        let g = generate_complete_graph(n);
+        let g = complete(n);
         let _ = group.bench_function(format!("K{n}"), |b| {
             b.iter(|| {
                 let _ = g.laplacian();
@@ -48,7 +51,7 @@ fn bench_laplacian(c: &mut Criterion) {
 fn bench_eigenvalues(c: &mut Criterion) {
     let mut group = c.benchmark_group("eigenvalues");
     for &n in &[5, 10, 20] {
-        let g = generate_cycle(n);
+        let g = cycle(n);
         let l = g.laplacian();
         let _ = group.bench_function(format!("C{n}_laplacian"), |b| {
             b.iter(|| {

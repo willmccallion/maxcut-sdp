@@ -15,7 +15,6 @@
 //! All linear algebra is implemented from scratch — no external BLAS, LAPACK,
 //! or optimization libraries.
 
-pub mod bench;
 pub mod graph;
 pub mod maxcut;
 pub mod parser;
