@@ -187,7 +187,7 @@ def main():
 
     list_downloaded()
     print("\nExample:")
-    print("  cargo run --release -- --input scripts/graphs/rudy/g05_60.0.txt")
+    print("  cargo run --release -- scripts/graphs/rudy/g05_60.0.txt")
 
 
 if __name__ == "__main__":
